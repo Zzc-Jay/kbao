@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>泰和K包</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'PingFang SC','Microsoft YaHei',sans-serif;background:#0a5c36;color:#fff;min-height:100vh;overflow-x:hidden}
+.screen{display:none;max-width:800px;margin:0 auto;padding:16px}
+.screen.active{display:block}
+
+/* 大厅 */
+.lobby-card{background:rgba(255,255,255,0.1);border-radius:16px;padding:24px;margin-top:24px}
+.lobby-card h1{text-align:center;font-size:28px;margin-bottom:8px}
+.lobby-card .subtitle{text-align:center;color:#aaa;margin-bottom:24px;font-size:14px}
+input[type=text],input[type=number]{width:100%;padding:12px;border:1px solid rgba(255,255,255,0.2);border-radius:8px;background:rgba(0,0,0,0.3);color:#fff;font-size:16px;margin-bottom:12px}
+.btn{display:block;width:100%;padding:14px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:8px}
+.btn-primary{background:#f5a623;color:#000}
+.btn-danger{background:#e74c3c;color:#fff}
+.btn-success{background:#27ae60;color:#fff}
+.btn-outline{background:transparent;border:2px solid #f5a623;color:#f5a623}
+.btn-small{padding:8px 16px;font-size:14px;width:auto;display:inline-block}
+.btn:disabled{opacity:0.4;cursor:not-allowed}
+
+/* 房间 */
+.room-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.room-code{font-size:36px;font-weight:bold;letter-spacing:4px;color:#f5a623}
+.player-list{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}
+.player-item{background:rgba(255,255,255,0.1);border-radius:12px;padding:16px;flex:1;min-width:140px;text-align:center}
+.player-item .name{font-size:16px;font-weight:600}
+.player-item .seat{font-size:12px;color:#aaa}
+.player-item.is-host .name::after{content:' [房主]';font-size:12px;color:#f5a623}
+
+/* 头像 */
+.avatar{width:48px;height:48px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:bold;font-size:20px;color:#fff;flex-shrink:0}
+.avatar-sm{width:38px;height:38px;font-size:15px}
+
+/* 牌桌 */
+.game-screen-inner{position:fixed;inset:0;pointer-events:none}
+
+.game-top-left{position:absolute;top:8px;left:8px;z-index:5;pointer-events:auto;display:flex;align-items:center;gap:10px}
+.game-top-left .btn-exit{width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.08);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;flex-shrink:0}
+.game-top-left .btn-detail{padding:3px 10px;font-size:12px;border-radius:12px;border:1px solid rgba(255,255,255,0.25);background:rgba(255,255,255,0.08);color:#ccc;cursor:pointer}
+.game-top-left .round-info{font-size:18px;font-weight:bold;line-height:1.2}
+.game-top-right{position:absolute;top:8px;right:12px;z-index:5;pointer-events:auto;text-align:right;font-size:13px;line-height:1.6}
+.game-top-right .action-hint{color:#f5a623;font-size:14px;font-weight:600}
+.phase-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:13px;background:rgba(255,255,255,0.15)}
+.multiplier-badge{font-size:14px;color:#f5a623}
+
+/* 对手 — 覆盖全屏，上边缘100px，左右150px */
+.opponents-wrap{position:absolute;inset:0;pointer-events:none;z-index:2}
+.opponent{position:absolute;text-align:center;pointer-events:auto;white-space:nowrap}
+.opponent .card-back{display:inline-flex;align-items:center;justify-content:center;width:50px;height:72px;background:linear-gradient(135deg,#556,#778);border-radius:5px;margin-top:2px;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
+.opponent .card-back .count{color:#fff;font-size:20px;font-weight:bold;text-shadow:0 1px 2px rgba(0,0,0,0.6)}
+.opponent .pname{font-size:14px;display:flex;align-items:center;justify-content:center;gap:3px;line-height:1.2;margin-bottom:2px;white-space:nowrap}
+.opponent .pname .tag{font-size:11px;color:#f5a623}
+.opponent.current .card-back{box-shadow:0 0 0 2px #f5a623,0 2px 6px rgba(245,166,35,0.4)}
+.opponent.is-banker .pname .tag::before{content:'[庄]'}
+.opponent.current .pname .tag::before{content:'[出牌中]';color:#f5a623}
+
+/* 出牌区 */
+.play-area{position:absolute;inset:0;z-index:3;pointer-events:none}
+.play-card{display:inline-flex;flex-direction:column;align-items:flex-start;width:68px;height:96px;background:#fff;color:#000;border-radius:8px;font-weight:bold;font-size:18px;box-shadow:0 3px 8px rgba(0,0,0,0.5);position:absolute;transition:box-shadow 0.3s;padding:8px 0 0 9px;transform-origin:50% 100%}
+.play-card.red{color:#e74c3c}
+.play-card.latest{box-shadow:0 0 10px #f5a623,0 0 25px rgba(245,166,35,0.6),0 3px 8px rgba(0,0,0,0.5)}
+.play-card .prank{font-size:24px;line-height:1.1}
+.play-card .psuit{font-size:12px;padding-left:3px}
+
+/* 操作栏 */
+.action-bar-wrap{position:absolute;bottom:170px;left:50%;transform:translateX(-50%);z-index:60;pointer-events:auto}
+.action-bar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.action-bar .btn{width:auto;padding:8px 18px;font-size:14px;margin-bottom:0;border-radius:20px}
+.action-bar .btn:disabled{opacity:0.35;cursor:not-allowed}
+.action-bar .waiting-text{color:rgba(255,255,255,0.4);font-size:12px;padding:6px 0}
+
+/* 手牌 — 堆叠效果 + 选中上拉 */
+.hand-area{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);z-index:50;max-width:100vw;padding:8px 12px}
+.hand-cards{position:relative;width:320px;height:110px;margin:0 auto}
+.hand-card{position:absolute;bottom:0;width:64px;height:90px;background:#fff;color:#000;border-radius:6px;display:flex;flex-direction:column;font-weight:bold;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.35);transition:transform 0.12s,box-shadow 0.12s;padding:7px 0 0 8px;transform-origin:50% calc(100% + 10px)}
+.hand-card.red{color:#e74c3c}
+.hand-card .rank{font-size:23px;line-height:1.1}
+.hand-card .suit{font-size:11px;padding-left:2px}
+.hand-card.selected{box-shadow:0 6px 18px rgba(245,166,35,0.5);border:2px solid #f5a623}
+.hand-card.selected:last-child{margin-right:0}
+/* 对话框 */
+.dialog-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:100}
+.dialog{background:#1a3a2a;border-radius:16px;padding:24px;max-width:360px;width:90%}
+.dialog h3{margin-bottom:16px;text-align:center}
+.dialog .suit-grid{display:flex;gap:8px;justify-content:center;margin-bottom:12px}
+.dialog .suit-btn{width:50px;height:50px;border-radius:8px;border:2px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:#fff;font-size:24px;cursor:pointer}
+.dialog .suit-btn:hover,.dialog .suit-btn.selected{border-color:#f5a623;background:rgba(245,166,35,0.2)}
+.dialog .suit-btn.disabled{opacity:0.3;cursor:not-allowed;pointer-events:none}
+	.dialog .rank-grid{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-bottom:16px}
+.dialog .rank-btn{width:42px;height:42px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:#fff;font-size:16px;font-weight:600;cursor:pointer}
+.dialog .rank-btn:hover,.dialog .rank-btn.selected{border-color:#f5a623;background:rgba(245,166,35,0.3)}
+.dialog .rank-btn.disabled{opacity:0.3;cursor:not-allowed}
+
+/* 结算弹窗 */
+.result-card{text-align:center;padding:16px}
+.result-card .verdict{font-size:28px;font-weight:bold;margin:12px 0}
+.result-card .verdict.win{color:#27ae60}
+.result-card .verdict.lose{color:#e74c3c}
+.result-card .payouts{margin:16px 0;font-size:14px}
+.result-card .payout-item{display:flex;justify-content:space-between;padding:4px 0}
+.result-card .positive{color:#27ae60}
+.result-card .negative{color:#e74c3c}
+
+/* 战绩弹窗 */
+.history-card{text-align:center;padding:16px;max-height:70vh;overflow-y:auto;max-width:600px}
+.history-card .history-table{width:100%;border-collapse:collapse;font-size:12px;margin:12px 0}
+.history-card .history-table th,.history-card .history-table td{padding:4px 6px;border:1px solid rgba(255,255,255,0.12);text-align:center;white-space:nowrap}
+.history-card .history-table th{background:rgba(255,255,255,0.08);font-weight:600}
+.history-card .history-total{margin-top:12px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.15);font-size:16px;font-weight:bold}
+.history-card .positive{color:#27ae60}
+.history-card .negative{color:#e74c3c}
+
+/* Toast */
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:rgba(231,76,60,0.9);color:#fff;padding:10px 24px;border-radius:20px;font-size:14px;z-index:200;animation:fadeInOut 2s forwards}
+@keyframes fadeInOut{0%,100%{opacity:0}10%,90%{opacity:1}}
+
+/* 消息日志 */
+.msg-log{position:fixed;right:8px;bottom:8px;width:300px;height:200px;background:rgba(0,0,0,0.7);border-radius:10px;z-index:150;overflow-y:auto;padding:8px 10px;font-size:12px;line-height:1.55;-webkit-overflow-scrolling:touch}
+.msg-log .msg-item{color:#bbb;padding:1px 0;border-bottom:1px solid rgba(255,255,255,0.05)}
+.msg-log .msg-item .ts{color:#777;margin-right:5px}
+.msg-log .msg-item.hl{color:#f5a623;font-weight:600}
+.msg-log::-webkit-scrollbar{width:4px}
+.msg-log::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:2px}
+</style>
+</head>
+<body>
+
+<!-- 大厅 -->
+<div id="lobbyScreen" class="screen active">
+  <div class="lobby-card">
+    <h1>🃏 泰和K包</h1>
+    <div class="subtitle">江西泰和 · 地方扑克</div>
+    <input type="text" id="playerName" placeholder="你的昵称" maxlength="8">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <span style="font-size:14px;color:#aaa">人数：</span>
+      <select id="playerCount" style="flex:1;padding:12px;border-radius:8px;background:rgba(0,0,0,0.3);color:#fff;font-size:16px;border:1px solid rgba(255,255,255,0.2)">
+        <option value="4">4 人局 (每人9张)</option>
+        <option value="5">5 人局 (每人7张)</option>
+        <option value="6">6 人局 (每人6张)</option>
+      </select>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;color:#aaa">
+        <input type="checkbox" id="debugMode" style="width:auto;margin:0"> 调试模式（自动填满机器人）
+      </label>
+    </div>
+    <button class="btn btn-primary" onclick="createRoom()">创建房间</button>
+    <div style="display:flex;gap:8px;align-items:stretch">
+      <input type="text" id="joinCode" placeholder="输入6位房间码" maxlength="6"
+        style="flex:1;font-size:18px;text-align:center;letter-spacing:8px;margin-bottom:12px"
+        onkeydown="if(event.key==='Enter')joinRoom()">
+      <button class="btn btn-outline" onclick="joinRoom()"
+        style="width:auto;flex-shrink:0;padding:10px 16px;margin-bottom:12px;font-size:14px;white-space:nowrap">加入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 房间等待页 -->
+<div id="roomScreen" class="screen">
+  <div class="room-header">
+    <button class="btn btn-small btn-outline" onclick="leaveRoom()">← 退出</button>
+    <div class="room-code" id="roomCodeDisplay">------</div>
+    <div style="width:60px"></div>
+  </div>
+  <div class="player-list" id="roomPlayerList"></div>
+  <button class="btn btn-primary" id="startBtn" style="display:none" onclick="startGame()">开始游戏</button>
+  <div style="text-align:center;color:#aaa;margin-top:16px" id="waitHint">等待更多玩家加入...</div>
+</div>
+
+<!-- 牌桌 -->
+<div id="gameScreen" class="screen" style="padding:0;max-width:none">
+  <div class="game-screen-inner">
+    <div class="game-top-left" id="gameTopLeft">
+      <button class="btn-exit" onclick="exitGame()" title="退出">✕</button>
+      <div class="round-info">第 <b id="roundNum">1</b> 局</div>
+      <button class="btn-detail" onclick="showGameDetail()">详情</button>
+    </div>
+    <div class="game-top-right" id="gameTopRight">
+      <span class="phase-badge" id="phaseBadge">准备中</span>
+      <span class="multiplier-badge" id="multiplierBadge"></span>
+      <div class="action-hint" id="actionHint"></div>
+    </div>
+    <div class="opponents-wrap" id="opponentList"></div>
+    <div class="play-area" id="playArea"></div>
+    <div class="action-bar-wrap" id="actionBarWrap" style="display:none">
+      <div class="action-bar" id="actionBar"></div>
+    </div>
+  </div>
+  <!-- 消息日志（右下角） -->
+  <div class="msg-log" id="msgLog"></div>
+</div>
+
+<!-- 手牌区 -->
+<div class="hand-area" id="handArea" style="display:none">
+  <div class="hand-cards" id="handCards"></div>
+</div>
+
+<!-- 要牌对话框 -->
+<div class="dialog-overlay" id="bidDialog" style="display:none">
+  <div class="dialog">
+    <h3 id="bidStepTitle">选择要的数字</h3>
+    <div class="rank-grid" id="rankGrid"></div>
+    <div class="suit-grid" id="suitGrid" style="display:none"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-outline" style="flex:1" onclick="hideBidDialog()">取消</button>
+      <button class="btn btn-primary" style="flex:1" id="confirmBidBtn" disabled onclick="confirmBid()">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- 结算弹窗 -->
+<div class="dialog-overlay" id="resultDialog" style="display:none">
+  <div class="dialog result-card">
+    <h3>本局结束</h3>
+    <div class="verdict" id="verdictText"></div>
+    <div class="payouts" id="payoutList"></div>
+    <div id="remainHands" style="text-align:left;font-size:13px;margin:8px 0;max-height:200px;overflow-y:auto"></div>
+    <button class="btn btn-primary" id="readyBtn" onclick="readyForNext()">准备</button>
+  </div>
+</div>
+
+
+	<!-- 战绩弹窗 -->
+	<div class="dialog-overlay" id="historyDialog" style="display:none">
+	  <div class="dialog history-card">
+	    <h3 id="historyTitle">战绩</h3>
+	    <div class="history-rounds" id="historyRounds"></div>
+	    <div class="history-total" id="historyTotal"></div>
+	    <button class="btn btn-primary" style="margin-top:12px" onclick="closeHistory()">确定</button>
+	  </div>
+	</div>
+<script>
+// ============ 全局状态 ============
+const SOCKET = io(window.location.origin)
+const PLAYER_ID = 'p_' + Math.random().toString(36).slice(2, 8)
+
+let myName = ''
+let myRoomCode = ''
+let mySeat = -1
+let myHand = []
+let gamePhase = ''
+let currentTurn = -1
+let bankerSeat = -1
+let isHost = false
+let lastComboType = null
+let lastComboCards = null
+let players = []
+let selectedCards = new Set()
+let selectedGiveIdx = -1  // 要牌阶段选中的手牌索引
+let selectedSuit = null
+let selectedRank = null
+let roundCount = 0
+let roundResults = []
+let totalWinLoss = 0
+let oldPlayersForHistory = null
+let tablePlays = []  // 桌面累计出牌
+
+// ============ 网络事件 ============
+
+SOCKET.on('connect', () => {
+  SOCKET.emit('join', { name: '' })
+})
+
+// 房间
+SOCKET.on('room:created', (data) => {
+  myRoomCode = data.roomCode
+  isHost = true
+  players = data.players
+  const me = players.find(p => p.id === SOCKET.id)
+  if (me) mySeat = me.seat
+  showScreen('room')
+  document.getElementById('roomCodeDisplay').textContent = data.roomCode
+  updateRoomUI(data)
+})
+
+SOCKET.on('room:joined', (data) => {
+  players = data.players
+  const me = data.players.find(p => p.id === SOCKET.id)
+  if (me) mySeat = me.seat
+  myRoomCode = data.roomCode
+  joiningRoom = false
+  showScreen('room')
+  document.getElementById('roomCodeDisplay').textContent = data.roomCode
+  updateRoomUI(data)
+})
+
+// 游戏
+SOCKET.on('game:deal', (data) => {
+  myHand = data.hand
+  data.handCounts.forEach((count, seat) => {
+    const p = players.find(pl => pl.seat === seat)
+    if (p) p.handCount = count
+  })
+  roundCount++
+  showScreen('game')
+  document.getElementById('handArea').style.display = 'block'
+  document.getElementById('actionBarWrap').style.display = 'none'
+  bankerSeat = -1
+  gamePhase = 'bidding-charge'
+  lastComboType = null
+  lastComboCards = null
+  tablePlays = []
+  document.getElementById('playArea').innerHTML = ''
+  document.getElementById('multiplierBadge').textContent = ''
+  document.getElementById('roundNum').textContent = roundCount
+  document.getElementById('msgLog').innerHTML = ''
+  document.getElementById('msgLog').style.display = 'block'
+  lastLoggedMsg = ''  // 新局重置去重
+  animateDeal(data.hand)
+  renderOpponents()
+})
+
+SOCKET.on('game:phase', (data) => {
+  gamePhase = data.phase
+  currentTurn = data.currentTurn
+  updatePhaseUI()
+})
+
+// 要牌换牌通知
+SOCKET.on('game:card-swapped', (data) => {
+  const reqP = players.find(p => p.seat === data.requesterSeat)
+  const holP = players.find(p => p.seat === data.holderSeat)
+  const reqName = reqP ? (reqP.name || '玩家') : ('座' + (data.requesterSeat + 1))
+  const holName = holP ? (holP.name || '玩家') : ('座' + (data.holderSeat + 1))
+  const labels = {4:'4',5:'5',6:'6',7:'7',9:'9',10:'10',11:'J',12:'Q',13:'K'}
+  const suits = {spade:'♠',heart:'♥',club:'♣',diamond:'♦'}
+  const cardStr = suits[data.card.suit] + labels[data.card.rank]
+  logMsg(`${reqName} 从 ${holName} 手中拿走了 ${cardStr}`, true)
+  updatePlayAreaForSwap(data.card)
+})
+
+// 服务器推送最新手牌（换牌后）
+SOCKET.on('game:hand-update', (data) => {
+  myHand = data.hand
+  renderHand()
+})
+
+let bidCanPass = true
+
+SOCKET.on('bid:ask', (data) => {
+  currentTurn = data.seat
+  bidCanPass = data.canPass !== false
+  updatePhaseUI()
+  // 日志：轮到谁做什么（此时 canPass 和 currentTurn 已确定）
+  const cp = players.find(p => p.seat === currentTurn)
+  const name = cp ? (cp.name || '玩家') : '?'
+  if (data.phase === 'charge') {
+    logMsg(`轮到 ${name} 决定是否冲`)
+  } else {
+    logMsg(bidCanPass ? `轮到 ${name} 要牌或过` : `轮到 ${name} 要牌`)
+  }
+  if (data.seat === mySeat) {
+    if (data.phase === 'charge') {
+      showChargeButtons()
+    } else {
+      // 要牌阶段：先选手牌，再要牌
+      selectedGiveIdx = -1
+      showRequestButtons()
+    }
+  document.getElementById("actionHint").textContent = `轮到 ${name} 出牌`
+    } else {
+    showWaitingText()
+  }
+  renderHand()
+})
+
+SOCKET.on('bid:result', (data) => {
+  bankerSeat = data.bankerSeat
+  document.getElementById('multiplierBadge').textContent = data.multiplier + '倍'
+  const bp = players.find(p => p.seat === data.bankerSeat)
+  const bname = bp ? (bp.name || '玩家') : ('座' + (data.bankerSeat + 1))
+  logMsg(`${bname} 成为庄家 · ${data.multiplier}倍`, true)
+  updatePhaseUI()
+})
+
+SOCKET.on('play:ask', (data) => {
+  currentTurn = data.seat
+  lastComboType = data.comboType
+  lastComboCards = data.lastPlay ? data.lastPlay.cards : null
+  updatePhaseUI()
+  const cp = players.find(p => p.seat === currentTurn)
+  const name = cp ? (cp.name || '玩家') : '?'
+  logMsg(`轮到 ${name} 出牌`)
+  if (data.seat === mySeat) {
+    hintIdx = 0; hintCombos = []
+    document.getElementById('actionHint').textContent = data.comboType
+      ? `请出牌（大于 ${comboTypeLabel(data.comboType)}）`
+      : '请自由出牌'
+    showPlayButtons(data.comboType !== null)
+  } else {
+    document.getElementById('actionHint').textContent = `轮到 ${name} 出牌`
+    showWaitingText()
+  }
+  selectedCards.clear()
+  selectedGiveIdx = -1
+  renderHand()
+})
+
+SOCKET.on('play:reject', (data) => {
+  showToast(data.reason)
+  selectedCards.clear()
+  hintIdx = 0; hintCombos = []
+  renderHand()
+  showPlayButtons(lastComboType !== null)
+})
+
+SOCKET.on('play:result', (data) => {
+  if (!data.isPass && data.combo) {
+    addTablePlay(data.seat, data.combo.cards)
+    if (data.seat === mySeat) {
+      // 从手牌移除已出的牌
+      for (const c of data.combo.cards) {
+        const idx = myHand.findIndex(h => h.suit === c.suit && h.rank === c.rank)
+        if (idx >= 0) myHand.splice(idx, 1)
+      }
+      renderHand()
+      selectedGiveIdx = -1
+    }
+    // 更新该玩家的手牌数
+    const p = players.find(pl => pl.seat === data.seat)
+    if (p) p.handCount = data.handCount
+    // 所有玩家都需要知道最新出的牌（用于后续 emitPhase 更新）
+    lastComboType = data.combo.type
+    lastComboCards = data.combo.cards
+    const cp = players.find(pl => pl.seat === data.seat)
+    const cpName = cp ? (cp.name || '玩家') : '座' + (data.seat + 1)
+    document.getElementById('actionHint').textContent = `${cpName} 出了 ${cardsToString(data.combo.cards)}`
+    logMsg(`${cpName} 出了 ${cardsToString(data.combo.cards)}`, true)
+  }
+  if (data.isPass) {
+    const cp = players.find(pl => pl.seat === data.seat)
+    const cpName = cp ? (cp.name || '玩家') : '座' + (data.seat + 1)
+    document.getElementById('actionHint').textContent = `${cpName} 不出`
+    logMsg(`${cpName} 不出`)
+  }
+  // 确保对手视图也刷新
+  renderOpponents()
+  selectedCards.clear()
+  renderHand()
+})
+
+SOCKET.on('game:over', (data) => {
+  gamePhase = 'settlement'
+  hideActionBar()
+  // 保存本局结果（所有人的输赢）
+  const myPayout = data.payouts[mySeat] || 0
+  roundResults.push({
+    round: roundCount,
+    bankerSeat: bankerSeat,
+    bankerWin: data.bankerWin,
+    multiplier: data.multiplier,
+    payouts: data.payouts,
+    bidType: data.bidType || 'request',
+  })
+  totalWinLoss += myPayout
+  tablePlays = []
+  document.getElementById('playArea').innerHTML = ''
+  showResult(data)
+})
+
+SOCKET.on('game:dole', (data) => {
+  hideActionBar()
+  const myPayout = (data.payouts && data.payouts[mySeat]) || 0
+  roundResults.push({
+    round: roundCount,
+    bankerSeat: data.doleSeat,
+    bankerWin: true,
+    multiplier: data.multiplier || 1,
+    payouts: data.payouts || [],
+    bidType: 'dole',
+  })
+  totalWinLoss += myPayout
+  showToast('低保！起始人从每人收1分，重新发牌')
+})
+
+SOCKET.on('game:left', (data) => {
+  hideActionBar()
+  document.getElementById('handArea').style.display = 'none'
+  // 用离开前的玩家列表找到自己的旧座位号
+  oldPlayersForHistory = data.oldPlayers
+  const oldMe = data.oldPlayers.find(p => p.id === SOCKET.id)
+  const myOldSeat = oldMe ? oldMe.seat : mySeat
+  // 将服务端历史转为客户端格式（保留所有人的 payouts）
+  const history = data.history.map((r, i) => ({
+    round: i + 1,
+    bankerSeat: r.bankerSeat,
+    bankerWin: r.bankerWin,
+    multiplier: r.multiplier,
+    payouts: r.payouts || [],
+    bidType: r.bidType || 'request',
+  }))
+  roundResults = history
+  totalWinLoss = history.reduce((sum, r) => (r.payouts && r.payouts[myOldSeat]) ? sum + r.payouts[myOldSeat] : sum, 0)
+  showHistory(data.playerName + ' 退出了房间', history)
+})
+
+SOCKET.on('game:next', () => {
+  document.getElementById('resultDialog').style.display = 'none'
+  tablePlays = []
+  document.getElementById('playArea').innerHTML = ''
+  document.getElementById('multiplierBadge').textContent = ''
+  document.getElementById('actionHint').textContent = ''
+  selectedCards.clear()
+  hintIdx = 0; hintCombos = []
+  lastComboType = null
+  lastComboCards = null
+})
+
+SOCKET.on('error', (data) => {
+  showToast(data.message)
+  joiningRoom = false
+  if (data.message && data.message.includes('已')) {
+    myRoomCode = ''
+  }
+})
+
+// ============ 大厅操作 ============
+
+function createRoom() {
+  const name = document.getElementById('playerName').value.trim() || '玩家'
+  myName = name
+  const pc = parseInt(document.getElementById('playerCount').value)
+  const debug = document.getElementById('debugMode').checked
+  SOCKET.emit('join', { name })
+  // 直接发送 room:create，附带 name 作为兜底
+  SOCKET.emit('room:create', { playerCount: pc, debug, name })
+}
+
+let joiningRoom = false
+function joinRoom() {
+  if (joiningRoom) return
+  const name = document.getElementById('playerName').value.trim() || '玩家'
+  myName = name
+  const code = document.getElementById('joinCode').value.trim()
+  if (!code) return showToast('请输入房间码')
+  if (myRoomCode) return showToast('你已在房间中')
+  joiningRoom = true
+  myRoomCode = code
+  SOCKET.emit('join', { name })
+  SOCKET.emit('room:join', { roomCode: code })
+}
+
+// ============ 房间操作 ============
+
+function updateRoomUI(data) {
+  const list = document.getElementById('roomPlayerList')
+  list.innerHTML = data.players.map(p => `
+    <div class="player-item ${p.id === data.players[0]?.id ? 'is-host' : ''}">
+      <div style="margin-bottom:6px">${avatarHTML(p.name, p.seat, false)}</div>
+      <div class="name">${p.name || '玩家'}</div>
+      <div class="seat">座位 ${p.seat + 1} ${p.id === SOCKET.id ? '(你)' : ''}</div>
+    </div>
+  `).join('')
+
+  const startBtn = document.getElementById('startBtn')
+  const isMe = data.players.some(p => p.id === SOCKET.id)
+  const hostPlayer = data.players[0]
+  if (hostPlayer && hostPlayer.id === SOCKET.id && data.players.length >= 2) {
+    startBtn.style.display = 'block'
+  } else {
+    startBtn.style.display = 'none'
+  }
+
+  const hint = document.getElementById('waitHint')
+  if (data.players.length >= 2) {
+    hint.textContent = `当前 ${data.players.length} 人，等待房主开始...`
+  } else {
+    hint.textContent = '等待更多玩家加入...'
+  }
+}
+
+function startGame() {
+  SOCKET.emit('room:start')
+}
+
+function leaveRoom() {
+  SOCKET.emit('room:leave')
+  myRoomCode = ''
+  mySeat = -1
+  isHost = false
+  joiningRoom = false
+  players = []
+  myHand = []
+  bankerSeat = -1
+  currentTurn = -1
+  gamePhase = ''
+  roundCount = 0
+  roundResults = []
+  totalWinLoss = 0
+  oldPlayersForHistory = null
+  lastComboType = null
+  lastComboCards = null
+  tablePlays = []
+  document.getElementById('handArea').style.display = 'none'
+  hideActionBar()
+  document.getElementById('playArea').innerHTML = ''
+  document.getElementById('opponentList').innerHTML = ''
+  document.getElementById('actionHint').textContent = ''
+  document.getElementById('msgLog').style.display = 'none'
+  showScreen('lobby')
+}
+
+// ============ 游戏：包牌 ============
+
+function showChargeButtons() {
+  document.getElementById('actionBarWrap').style.display = 'block'
+  document.getElementById('actionBar').innerHTML = `
+    <button class="btn btn-danger" onclick="submitBid('charge')">冲 (5倍)</button>
+    <button class="btn btn-outline" onclick="submitBid('pass')">不冲</button>
+  `
+}
+
+function showRequestButtons() {
+  document.getElementById('actionBarWrap').style.display = 'block'
+  const hasCard = selectedGiveIdx >= 0
+  document.getElementById('actionBar').innerHTML = `
+    ${hasCard ? '<button class="btn btn-primary" onclick="showBidDialog()">要牌</button>' : ''}
+    ${bidCanPass ? '<button class="btn btn-outline" onclick="submitBid(\'pass\')">过</button>' : ''}
+    ${!hasCard ? '<span style="font-size:12px;color:#aaa">请先选择一张手牌用于交换</span>' : ''}
+  `
+}
+
+function showWaitingText() {
+  document.getElementById('actionBarWrap').style.display = 'block'
+  document.getElementById('actionBar').innerHTML = '<span class="waiting-text">等待其他玩家操作...</span>'
+}
+
+function submitBid(type) {
+  if (type === 'charge') {
+    SOCKET.emit('bid:submit', { bid: { type: 'charge', seat: mySeat } })
+  } else if (type === 'pass') {
+    SOCKET.emit('bid:submit', { bid: { type: 'pass', seat: mySeat } })
+  }
+  showWaitingText()
+}
+
+function showBidDialog() {
+  document.getElementById('bidDialog').style.display = 'flex'
+  selectedSuit = null
+  selectedRank = null
+  document.getElementById('confirmBidBtn').disabled = true
+  document.getElementById('bidStepTitle').textContent = '选择要的数字'
+  document.getElementById('suitGrid').style.display = 'none'
+  document.getElementById('suitGrid').innerHTML = ''
+  document.getElementById('rankGrid').style.display = ''
+  buildRankGrid()
+}
+
+function hideBidDialog() {
+  document.getElementById('bidDialog').style.display = 'none'
+  // 取消时若轮到本人发言，非起始人自动过牌，起始人回到按钮选择
+  if (gamePhase === 'bidding-request' && currentTurn === mySeat) {
+    if (!bidCanPass) {
+      selectedGiveIdx = -1
+      showRequestButtons()
+      renderHand()
+    } else {
+      submitBid('pass')
+    }
+  }
+}
+
+function selectSuit(suit, emoji) {
+  selectedSuit = suit
+  document.querySelectorAll('.suit-btn').forEach(b => b.classList.remove('selected'))
+  event.target.classList.add('selected')
+  document.getElementById('confirmBidBtn').disabled = false
+}
+
+function buildRankGrid() {
+  const ranks = [4,5,6,7,9,10,11,12,13]
+  const labels = {4:'4',5:'5',6:'6',7:'7',9:'9',10:'10',11:'J',12:'Q',13:'K'}
+  const done = new Set()
+  for (const r of ranks) {
+    const suits = new Set(myHand.filter(c => c.rank === r).map(c => c.suit))
+    if (suits.size >= 4) done.add(r)
+  }
+  const available = ranks.filter(r => r !== 13 && !done.has(r))
+  const grid = document.getElementById('rankGrid')
+  if (available.length === 0) {
+    grid.innerHTML = '<span style="color:#aaa;font-size:13px">没有可要的牌，请取消</span>'
+  } else {
+    grid.innerHTML = available.map(r => '<button class="rank-btn" onclick="selectRank(' + r + ')">' + labels[r] + '</button>').join('')
+  }
+}
+
+function selectRank(rank) {
+  selectedRank = rank
+  document.getElementById('bidStepTitle').textContent = '选择花色'
+  document.getElementById('rankGrid').style.display = 'none'
+  const ownedSuits = new Set(myHand.filter(c => c.rank === rank).map(c => c.suit))
+  const allSuits = [
+    {suit:'spade', emoji:'♠', red:false},
+    {suit:'heart', emoji:'♥', red:true},
+    {suit:'club', emoji:'♣', red:false},
+    {suit:'diamond', emoji:'♦', red:true},
+  ]
+  const available = allSuits.filter(s => !ownedSuits.has(s.suit))
+  const grid = document.getElementById('suitGrid')
+  if (available.length === 0) {
+    grid.innerHTML = '<span style="color:#aaa;font-size:13px">你已有该数字所有花色</span>'
+  } else {
+    grid.innerHTML = available.map(s => '<button class="suit-btn" data-suit="' + s.suit + '" style="' + (s.red ? 'color:#e74c3c' : '') + '" onclick="selectSuit(\'' + s.suit + '\',\'' + s.emoji + '\')">' + s.emoji + '</button>').join('')
+  }
+  grid.style.display = 'flex'
+  selectedSuit = null
+  document.getElementById('confirmBidBtn').disabled = true
+}
+
+function confirmBid() {
+  if (!selectedSuit || !selectedRank) return
+  const giveCard = selectedGiveIdx >= 0 ? myHand[selectedGiveIdx] : null
+  SOCKET.emit('bid:submit', {
+    bid: {
+      type: 'request',
+      seat: mySeat,
+      card: { suit: selectedSuit, rank: selectedRank },
+      giveCard
+    }
+  })
+  // 不在这里删除 giveCard — 服务端会通过 game:hand-update 推送完整新手牌
+  selectedGiveIdx = -1
+  document.getElementById('bidDialog').style.display = 'none'
+  showWaitingText()
+  renderHand()
+}
+
+// ============ 游戏：出牌 ============
+
+function showPlayButtons(canPass) {
+  document.getElementById('actionBarWrap').style.display = 'block'
+  const combos = findHintCombos()
+  const noPlayable = lastComboType && combos.length === 0
+  const disabled = selectedCards.size === 0 ? 'disabled' : ''
+  document.getElementById('actionBar').innerHTML = `
+    <button class="btn btn-success" id="btnPlay" ${disabled} onclick="submitPlay()">出牌</button>
+    ${noPlayable ? '' : `<button class="btn btn-outline" id="btnHint" style="width:auto;padding:8px 14px" onclick="doHint()">提示</button>`}
+    ${canPass ? '<button class="btn btn-outline" onclick="submitPass()">不出</button>' : ''}
+  `
+}
+
+function updatePlayBtnState() {
+  const btn = document.getElementById('btnPlay')
+  if (btn) btn.disabled = selectedCards.size === 0
+}
+
+function hideActionBar() {
+  document.getElementById('actionBarWrap').style.display = 'none'
+}
+
+function submitPlay() {
+  if (selectedCards.size === 0) return showToast('请先选择手牌')
+  const cards = []
+  for (const idx of selectedCards) {
+    cards.push(myHand[idx])
+  }
+  SOCKET.emit('play:submit', { cards })
+  selectedCards.clear()
+  hintIdx = 0; hintCombos = []
+  showWaitingText()
+}
+
+function submitPass() {
+  SOCKET.emit('play:pass')
+  selectedCards.clear()
+  hintIdx = 0; hintCombos = []
+  renderHand()
+  showWaitingText()
+}
+
+// ============ 渲染 ============
+
+function animateDeal(hand) {
+  const sorted = [...hand].sort((a, b) => b.rank - a.rank)
+  myHand = []
+  renderHand()
+  let i = 0
+  const iv = setInterval(() => {
+    if (i >= sorted.length) { clearInterval(iv); return }
+    myHand.push(sorted[i])
+    renderHand()
+    i++
+  }, 200)
+}
+
+let hintCombos = []
+let hintIdx = 0
+
+function renderHand() {
+  const container = document.getElementById('handCards')
+  const labels = {4:'4',5:'5',6:'6',7:'7',9:'9',10:'10',11:'J',12:'Q',13:'K'}
+  const suits = {spade:'♠',heart:'♥',club:'♣',diamond:'♦'}
+  const n = myHand.length
+  const center = (n - 1) / 2
+  const spacing = 5       // 牌左边缘间距 px
+  const fanStep = 15      // 每张牌旋转角度
+  const isMyPlayTurn = gamePhase === 'playing' && currentTurn === mySeat
+  container.innerHTML = myHand.map((c, i) => {
+    const isRed = c.suit === 'heart' || c.suit === 'diamond'
+    const isPlaying = selectedCards.has(i)
+    const isGiving = selectedGiveIdx === i
+    const dx = (i - center) * spacing
+    const rot = (i - center) * fanStep
+    const z = i + 1
+    const selClass = isPlaying || isGiving ? ' selected' : ''
+    const yOff = isPlaying || isGiving ? ' translateY(-22px)' : ''
+    const action = isMyPlayTurn
+      ? `onpointerdown="onCardDown(event,${i})"`
+      : (gamePhase === 'bidding-request' ? `onclick="toggleCard(${i})"` : '')
+    return `<div class="hand-card ${isRed ? 'red' : ''}${selClass}"
+      style="left:calc(50% - 32px + ${dx}px);transform:rotate(${rot}deg)${yOff};z-index:${z}"
+      data-idx="${i}" ${action}>
+      <span class="rank">${labels[c.rank]}</span>
+      <span class="suit">${suits[c.suit]}</span>
+    </div>`
+  }).join('')
+}
+
+function toggleCard(idx) {
+  if (currentTurn !== mySeat) return
+  if (gamePhase === 'playing') {
+    if (selectedCards.has(idx)) {
+      selectedCards.delete(idx)
+    } else {
+      selectedCards.add(idx)
+    }
+    hintIdx = 0; hintCombos = []
+    updatePlayBtnState()
+  } else if (gamePhase === 'bidding-request') {
+    if (selectedGiveIdx === idx) {
+      selectedGiveIdx = -1
+    } else {
+      selectedGiveIdx = idx
+    }
+    showRequestButtons()
+  }
+  renderHand()
+}
+
+// ─── 拖拽多选（保留点击）───
+let dragSel = null
+let dragMoved = false
+
+function onCardDown(e, idx) {
+  if (currentTurn !== mySeat || gamePhase !== 'playing') return
+  e.preventDefault()
+  dragSel = { start: idx, prev: idx }
+  dragMoved = false
+  document.addEventListener('pointermove', onDragMove)
+  document.addEventListener('pointerup', onDragUp)
+}
+
+function onDragMove(e) {
+  if (!dragSel) return
+  const el = document.elementFromPoint(e.clientX, e.clientY)
+  if (!el || !el.classList.contains('hand-card')) return
+  const idx = parseInt(el.dataset.idx)
+  if (isNaN(idx) || idx === dragSel.prev) return
+  dragMoved = true
+  dragSel.prev = idx
+  const a = dragSel.start, b = idx
+  const lo = Math.min(a, b), hi = Math.max(a, b)
+  selectedCards.clear()
+  for (let i = lo; i <= hi; i++) selectedCards.add(i)
+  hintIdx = 0; hintCombos = []
+  updatePlayBtnState()
+  renderHand()
+}
+
+function onDragUp() {
+  document.removeEventListener('pointermove', onDragMove)
+  document.removeEventListener('pointerup', onDragUp)
+  if (!dragMoved && dragSel) {
+    // 纯点击，切换选中
+    toggleCard(dragSel.start)
+  }
+  dragSel = null
+}
+
+// ─── 提示系统 ───
+function findHintCombos() {
+  if (myHand.length === 0) return []
+  const byRank = new Map()
+  myHand.forEach((c, i) => { if (!byRank.has(c.rank)) byRank.set(c.rank, []); byRank.get(c.rank).push(i) })
+  const ranks = [...byRank.keys()].sort((a, b) => a - b)
+
+  if (!lastComboType) {
+    // 新回合：单张从小到大，同数字从右往左
+    const sorted = myHand.map((c, i) => ({ idx: i, rank: c.rank }))
+      .sort((a, b) => a.rank - b.rank || b.idx - a.idx)
+    return sorted.map(s => ({ cards: [s.idx], type: 'single', rank: s.rank }))
+  }
+
+  const combos = []
+  const lastRank = lastComboCards ? Math.max(...lastComboCards.map(c => c.rank)) : 0
+  const lastLen = lastComboCards ? lastComboCards.length : 1
+
+  // 相同牌型管上
+  const addSameType = (type, needCount, biggerOnly) => {
+    for (const r of ranks) {
+      if (biggerOnly && r <= lastRank) continue
+      const idxs = byRank.get(r)
+      if (idxs.length >= needCount) {
+        const pick = [...idxs].sort((a, b) => b - a).slice(0, needCount)
+        combos.push({ cards: pick, type, rank: r })
+      }
+    }
+  }
+
+  switch (lastComboType) {
+    case 'single': addSameType('single', 1, true); break
+    case 'pair': addSameType('pair', 2, true); break
+    case 'triple': addSameType('triple', 3, true); break
+    case 'straight':
+      // 更大顺子或炸弹
+      for (const r of ranks) {
+        if (r > lastRank) {
+          const seq = findStraight(byRank, r, lastLen)
+          if (seq) combos.push({ cards: seq, type: 'straight', rank: r })
+        }
+      }
+      break
+    case 'double-straight':
+      for (const r of ranks) {
+        if (r > lastRank) {
+          const seq = findDoubleStraight(byRank, r, lastLen / 2)
+          if (seq) combos.push({ cards: seq, type: 'double-straight', rank: r })
+        }
+      }
+      break
+  }
+  // 炸弹管一切
+  if (lastComboType !== 'quadruple') {
+    for (const r of ranks) {
+      const idxs = byRank.get(r)
+      if (idxs.length >= 4) combos.push({ cards: idxs.slice(0, 4), type: 'quadruple', rank: r })
+    }
+  }
+  if (lastComboType !== 'triple' && lastComboType !== 'quadruple') {
+    for (const r of ranks) {
+      const idxs = byRank.get(r)
+      if (idxs.length >= 3) combos.push({ cards: idxs.slice(0, 3), type: 'triple', rank: r })
+    }
+  }
+  return combos.sort((a, b) => a.rank - b.rank || a.cards.length - b.cards.length)
+}
+
+const RANK_SEQ2 = [4, 5, 6, 7, 9, 10, 11, 12, 13]
+const RANK_NEXT = {4:5, 5:6, 6:7, 7:null, 9:10, 10:11, 11:12, 12:13, 13:null}
+function isRankConsecutive(ranks) {
+  for (let i = 1; i < ranks.length; i++) {
+    if (RANK_NEXT[ranks[i - 1]] !== ranks[i]) return false
+  }
+  return true
+}
+function findStraight(byRank, maxRank, len) {
+  const idx = RANK_SEQ2.indexOf(maxRank)
+  if (idx < len - 1) return null
+  const needed = RANK_SEQ2.slice(idx - len + 1, idx + 1)
+  if (!isRankConsecutive(needed)) return null
+  const result = []
+  for (const r of needed) {
+    const idxs = byRank.get(r)
+    if (!idxs || idxs.length === 0) return null
+    result.push(idxs[0])
+  }
+  return result
+}
+function findDoubleStraight(byRank, maxRank, pairCount) {
+  const idx = RANK_SEQ2.indexOf(maxRank)
+  if (idx < pairCount - 1) return null
+  const needed = RANK_SEQ2.slice(idx - pairCount + 1, idx + 1)
+  if (!isRankConsecutive(needed)) return null
+  const result = []
+  for (const r of needed) {
+    const idxs = byRank.get(r)
+    if (!idxs || idxs.length < 2) return null
+    result.push(idxs[0], idxs[1])
+  }
+  return result
+}
+
+function doHint() {
+  if (hintCombos.length === 0 || hintIdx >= hintCombos.length) {
+    hintCombos = findHintCombos()
+    hintIdx = 0
+  }
+  if (hintCombos.length === 0) return
+  const combo = hintCombos[hintIdx]
+  selectedCards = new Set(combo.cards)
+  hintIdx = (hintIdx + 1) % hintCombos.length
+  updatePlayBtnState()
+  renderHand()
+  showPlayButtons(lastComboType !== null)
+}
+
+const AVATAR_COLORS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c']
+function avatarHTML(name, seat, small) {
+  const c = AVATAR_COLORS[seat % AVATAR_COLORS.length]
+  const letter = (name || '玩')[0]
+  return `<span class="avatar ${small ? 'avatar-sm' : ''}" style="background:${c}">${letter}</span>`
+}
+
+function renderOpponents() {
+  const container = document.getElementById('opponentList')
+  const total = players.length
+  // 按顺时针排列：当前玩家 → 右侧 → 对面 → 左侧
+  const others = players
+    .filter(p => p.id !== SOCKET.id)
+    .sort((a, b) => ((a.seat - mySeat + total) % total) - ((b.seat - mySeat + total) % total))
+  const slots = getOpponentSlots(total - 1)
+  container.innerHTML = others.map((p, i) => {
+    const slot = slots[i] || { left: '50%', top: '100px' }
+    return `<div class="opponent ${p.seat === currentTurn ? 'current' : ''} ${p.seat === bankerSeat ? 'is-banker' : ''}"
+      style="left:${slot.left};top:${slot.top};transform:translate(-50%,-50%)">
+      <div class="pname">${avatarHTML(p.name, p.seat, true)} ${p.name || '玩家'}<span class="tag"></span></div>
+      <div class="card-back"><span class="count">${p.handCount ?? '?'}</span></div>
+    </div>`
+  }).join('')
+}
+
+function getOpponentSlots(count) {
+  // 把对手分布在：左侧、上方、右侧（上100px，左右150px）
+  if (count === 1) return [{ left: '50%', top: '100px' }]
+  if (count === 2) return [{ left: '150px', top: '50%' }, { left: 'calc(100% - 150px)', top: '50%' }]
+  if (count === 3) return [{ left: '150px', top: '50%' }, { left: '50%', top: '100px' }, { left: 'calc(100% - 150px)', top: '50%' }]
+  if (count === 4) return [{ left: '150px', top: '50%' }, { left: '30%', top: '100px' }, { left: '70%', top: '100px' }, { left: 'calc(100% - 150px)', top: '50%' }]
+  if (count === 5) return [{ left: '150px', top: '50%' }, { left: '25%', top: '100px' }, { left: '50%', top: '100px' }, { left: '75%', top: '100px' }, { left: 'calc(100% - 150px)', top: '50%' }]
+  return [{ left: '50%', top: '100px' }]
+}
+
+function updateOppHandCount(seat, count) {
+  renderOpponents()
+}
+
+function getSeatRotation(seat) {
+  const total = players.length
+  const rel = ((seat - mySeat) + total) % total
+  if (total === 4) return [0, 90, 180, -90][rel]
+  if (total === 5) return [0, 72, 144, -144, -72][rel]
+  if (total === 6) return [0, 60, 120, 180, -120, -60][rel]
+  return 0
+}
+
+function addTablePlay(seat, cards) {
+  const rot = getSeatRotation(seat)
+  const rad = rot * Math.PI / 180
+  // 牌底指向玩家方向向量 = (-sin, cos)
+  const dx = -Math.sin(rad)
+  const dy = Math.cos(rad)
+  // 朝玩家方向 30~120px
+  const dist = 30 + Math.random() * 90
+  const ox = dx * dist
+  const oy = dy * dist
+  // 垂直方向 ±70px（方向向量旋转90°）
+  const px = dy * (Math.random() - 0.5) * 140
+  const py = dx * (Math.random() - 0.5) * 140
+  tablePlays.push({
+    id: Date.now() + Math.random(),
+    seat, cards: [...cards], rot,
+    offsetX: ox + px,
+    offsetY: oy + py
+  })
+  renderTablePlays()
+}
+
+function renderTablePlays() {
+  const container = document.getElementById('playArea')
+  const labels = {4:'4',5:'5',6:'6',7:'7',9:'9',10:'10',11:'J',12:'Q',13:'K'}
+  const suits = {spade:'♠',heart:'♥',club:'♣',diamond:'♦'}
+  const latestId = tablePlays.length > 0 ? tablePlays[tablePlays.length - 1].id : null
+
+  let html = ''
+  tablePlays.forEach((play, pi) => {
+    const isLatest = play.id === latestId
+    const sorted = [...play.cards].sort((a, b) => a.rank - b.rank)
+    const n = sorted.length
+    const fanTotal = Math.min((n - 1) * 22, 90)
+
+    sorted.forEach((c, i) => {
+      const isRed = c.suit === 'heart' || c.suit === 'diamond'
+      const fanAngle = n > 1 ? (i / (n - 1) - 0.5) * fanTotal : 0
+      const totalRot = play.rot + fanAngle
+      const z = pi * 10 + i + 1
+
+      html += `<div class="play-card${isRed ? ' red' : ''}${isLatest ? ' latest' : ''}"
+        style="left:calc(50% + ${play.offsetX}px);
+        top:calc(50% + ${play.offsetY}px);
+        transform:translate(-50%,-100%) rotate(${totalRot}deg);
+        z-index:${z}">
+        <span class="prank">${labels[c.rank]}</span>
+        <span class="psuit">${suits[c.suit]}</span>
+      </div>`
+    })
+  })
+  container.innerHTML = html
+}
+
+function updatePhaseUI() {
+  const phaseMap = {
+    'bidding-charge': '第一轮：冲',
+    'bidding-request': '第二轮：要牌',
+    'playing': '出牌中',
+    'settlement': '结算',
+  }
+  document.getElementById('phaseBadge').textContent = phaseMap[gamePhase] || gamePhase
+  updateGameInfo()
+  renderOpponents()
+}
+
+function updateGameInfo() {
+  const hint = document.getElementById('actionHint')
+  if (!gamePhase || gamePhase === 'settlement') {
+    hint.textContent = ''
+    return
+  }
+  const cp = players.find(p => p.seat === currentTurn)
+  const name = cp ? (cp.name || '玩家') : '?'
+  if (gamePhase === 'bidding-charge') {
+    hint.textContent = `轮到 ${name} 决定是否冲`
+  } else if (gamePhase === 'bidding-request') {
+    hint.textContent = bidCanPass ? `轮到 ${name} 要牌或过` : `轮到 ${name} 要牌`
+  }
+  // playing phase: hint is set by play:result / play:ask handlers, don't overwrite
+}
+
+function cardsToString(cards) {
+  const labels = {4:'4',5:'5',6:'6',7:'7',9:'9',10:'10',11:'J',12:'Q',13:'K'}
+  return [...cards].sort((a, b) => a.rank - b.rank).map(c => labels[c.rank]).join(' ')
+}
+
+function comboTypeLabel(type) {
+  const map = { single: '单张', pair: '对子', straight: '顺子', 'double-straight': '连对', triple: '三张', quadruple: '四张' }
+  return map[type] || type
+}
+
+function showResult(data) {
+  const dialog = document.getElementById('resultDialog')
+  const verdict = document.getElementById('verdictText')
+  const payouts = document.getElementById('payoutList')
+  const remainDiv = document.getElementById('remainHands')
+  const readyBtn = document.getElementById('readyBtn')
+
+  verdict.style.display = 'none'
+  readyBtn.disabled = false
+  readyBtn.textContent = '准备'
+
+  payouts.innerHTML = players.map(p => {
+    const amt = data.payouts[p.seat] || 0
+    const cls = amt > 0 ? 'positive' : amt < 0 ? 'negative' : ''
+    return `<div class="payout-item">
+      <span>${p.name || '玩家'} (座${p.seat + 1})</span>
+      <span class="${cls}">${amt > 0 ? '+' + amt : amt}</span>
+    </div>`
+  }).join('') + `<div style="margin-top:8px;font-size:12px;color:#aaa">倍数：${data.multiplier}倍</div>`
+
+  // 展示所有玩家剩余手牌
+  if (data.hands) {
+    let html = '<div style="font-size:13px;color:#f5a623;margin-bottom:4px">剩余手牌</div>'
+    players.forEach(p => {
+      const hand = data.hands[p.seat]
+      if (!hand || hand.length === 0) {
+        html += `<div style="color:#888">${p.name || '玩家'}：已出完</div>`
+      } else {
+        const sorted = [...hand].sort((a, b) => b.rank - a.rank)
+        html += `<div>${p.name || '玩家'}：${cardsToString(sorted)}</div>`
+      }
+    })
+    remainDiv.innerHTML = html
+  }
+
+  dialog.style.display = 'flex'
+}
+
+function readyForNext() {
+  const btn = document.getElementById('readyBtn')
+  btn.disabled = true
+  btn.textContent = '已准备'
+  SOCKET.emit('game:ready')
+}
+
+function nextRound() {
+  SOCKET.emit('game:next')
+}
+
+function exitGame() {
+  if (confirm('确定退出游戏吗？')) {
+    SOCKET.emit('room:leave')
+    // 显示战绩
+    if (roundResults.length > 0) {
+      showHistory('你退出了房间', roundResults)
+    }
+    myRoomCode = ''
+    mySeat = -1
+    isHost = false
+    players = []
+    myHand = []
+    bankerSeat = -1
+    currentTurn = -1
+    gamePhase = ''
+    roundCount = 0
+    roundResults = []
+    totalWinLoss = 0
+    oldPlayersForHistory = null
+    tablePlays = []
+    document.getElementById('handArea').style.display = 'none'
+    hideActionBar()
+    document.getElementById('playArea').innerHTML = ''
+    document.getElementById('opponentList').innerHTML = ''
+    document.getElementById('actionHint').textContent = ''
+    document.getElementById('msgLog').style.display = 'none'
+    showScreen('lobby')
+  }
+}
+
+function showHistory(title, history) {
+  // 选择正确的玩家列表：game:left 时用 oldPlayersForHistory，否则用当前 players
+  const playerList = oldPlayersForHistory || players
+
+  document.getElementById('historyTitle').textContent = title
+
+  // 表头
+  let html = '<table class="history-table"><thead><tr>'
+  html += '<th>局</th><th>倍</th><th>庄家</th><th>结果</th>'
+  playerList.forEach(p => {
+    html += '<th>' + (p.name || '玩家') + (p.id === SOCKET.id ? '(我)' : '') + '</th>'
+  })
+  html += '</tr></thead><tbody>'
+
+  // 每局一行
+  history.forEach((r, i) => {
+    const bankerPlayer = playerList.find(p => p.seat === r.bankerSeat)
+    const bankerName = bankerPlayer ? (bankerPlayer.name || '玩家') : ('座' + (r.bankerSeat + 1))
+    const payouts = r.payouts || []
+    html += '<tr>'
+    html += '<td>' + r.round + '</td>'
+    html += '<td>' + r.multiplier + '倍</td>'
+    html += '<td>' + bankerName + '</td>'
+    const resultLabel = r.bidType === 'dole' ? '低保' : r.bidType === 'charge' ? '冲' : '要'
+    html += '<td>' + resultLabel + (r.bidType === 'dole' ? '' : (r.bankerWin ? '胜' : '败')) + '</td>'
+    playerList.forEach(p => {
+      const amt = payouts[p.seat] || 0
+      const cls = amt > 0 ? 'positive' : amt < 0 ? 'negative' : ''
+      html += '<td class="' + cls + '">' + (amt > 0 ? '+' + amt : amt) + '</td>'
+    })
+    html += '</tr>'
+  })
+
+  html += '</tbody></table>'
+  document.getElementById('historyRounds').innerHTML = html
+
+  const myPayout = totalWinLoss
+  const totalCls = myPayout > 0 ? 'positive' : myPayout < 0 ? 'negative' : ''
+  document.getElementById('historyTotal').innerHTML = '本人总计 <span class="' + totalCls + '">' + (myPayout > 0 ? '+' + myPayout : myPayout) + '</span>'
+
+  document.getElementById('historyDialog').style.display = 'flex'
+}
+
+function showGameDetail() {
+  if (roundResults.length === 0) {
+    showToast('暂无战绩')
+    return
+  }
+  showHistory('战绩详情', roundResults)
+}
+
+function closeHistory() {
+  document.getElementById('historyDialog').style.display = 'none'
+}
+
+// ============ 工具 ============
+
+let lastLoggedMsg = ''
+
+function logMsg(text, highlight) {
+  // 去重：相同内容不重复记录
+  const dedupKey = text
+  if (dedupKey === lastLoggedMsg) return
+  lastLoggedMsg = dedupKey
+
+  const log = document.getElementById('msgLog')
+  if (!log) return
+  const now = new Date()
+  const ts = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2) + ':' + ('0' + now.getSeconds()).slice(-2)
+  const el = document.createElement('div')
+  el.className = 'msg-item' + (highlight ? ' hl' : '')
+  el.innerHTML = '<span class="ts">' + ts + '</span>' + text
+  log.appendChild(el)
+  // 自动滚动到底部看最新消息
+  log.scrollTop = log.scrollHeight
+  // 限制最多 200 条
+  while (log.children.length > 200) {
+    log.removeChild(log.firstChild)
+  }
+}
+
+function updatePlayAreaForSwap(card) {
+  const labels = {4:'4',5:'5',6:'6',7:'7',9:'9',10:'10',11:'J',12:'Q',13:'K'}
+  const suits = {spade:'♠',heart:'♥',club:'♣',diamond:'♦'}
+  const isRed = card.suit === 'heart' || card.suit === 'diamond'
+  const area = document.getElementById('playArea')
+  area.innerHTML = `<div class="play-card ${isRed ? 'red' : ''}" style="opacity:0.7">
+    <span class="prank">${labels[card.rank]}</span>
+    <span class="psuit">${suits[card.suit]}</span>
+  </div>`
+  setTimeout(() => { if (area && area.innerHTML.indexOf('opacity:0.7') >= 0 && gamePhase !== 'playing') area.innerHTML = '' }, 2500)
+}
+
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'))
+  document.getElementById(name + 'Screen').classList.add('active')
+}
+
+function showToast(msg) {
+  const t = document.createElement('div')
+  t.className = 'toast'
+  t.textContent = msg
+  document.body.appendChild(t)
+  setTimeout(() => t.remove(), 2000)
+}
+</script>
+</body>
+</html>

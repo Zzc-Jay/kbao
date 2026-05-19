@@ -355,6 +355,7 @@ function createEventBus(io: Server, _socket: Socket): GameEventBus {
             hand: hands[i],
             handCounts: hands.map(h => h.length),
             playerCount: room.playerCount,
+            seat: i,
           })
         }
       })

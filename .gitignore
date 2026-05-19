@@ -1,5 +1,5 @@
-# .gitignore
+.claude/
+packages/client/
 node_modules/
 *.md
 *.pdf
-packages/client/

@@ -1,4 +1,4 @@
-import { Socket } from 'socket.io'
+interface SocketLike { id: string }
 
 export interface PlayerConn {
   socketId: string
@@ -12,7 +12,7 @@ export interface PlayerConn {
 
 const players = new Map<string, PlayerConn>()
 
-export function addPlayer(socket: Socket, name: string): PlayerConn {
+export function addPlayer(socket: SocketLike, name: string): PlayerConn {
   const p: PlayerConn = {
     socketId: socket.id,
     playerId: socket.id,

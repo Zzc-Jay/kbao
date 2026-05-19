@@ -1,12 +1,17 @@
 #!/bin/bash
 set -e
 
+echo "==> 安装 server 依赖..."
 cd "$(dirname "$0")/packages/server"
-
-echo "==> 安装依赖..."
 npm install
 
-echo "==> 构建 TypeScript..."
+echo "==> 构建 kbao-core..."
+cd ../kbao-core
+npm install
+npx tsc
+
+echo "==> 构建 server..."
+cd ../server
 npx tsc
 
 if pm2 describe kbao-server > /dev/null 2>&1; then

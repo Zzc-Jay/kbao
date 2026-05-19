@@ -4,7 +4,8 @@
   "description": "泰和K包游戏服务器",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "ts-node src/index.ts",
+    "dev": "npm run build:core && ts-node src/index.ts",
+    "build:core": "cd ../kbao-core && npx tsc",
     "build": "tsc",
     "start": "npm run build && node dist/index.js",
     "typecheck": "tsc --noEmit"

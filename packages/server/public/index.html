@@ -127,6 +127,46 @@ input[type=text],input[type=number]{width:100%;padding:12px;border:1px solid rgb
 .msg-log .msg-item.hl{color:#f5a623;font-weight:600}
 .msg-log::-webkit-scrollbar{width:4px}
 .msg-log::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:2px}
+
+/* ─── 手机适配 ─── */
+@media (max-width: 600px) {
+  .msg-log{display:none!important}
+  .hand-card{width:54px;height:80px;padding:6px 0 0 6px}
+  .hand-card .rank{font-size:20px}
+  .hand-card .suit{font-size:9px}
+  .hand-cards{width:280px;height:100px}
+  .hand-area{bottom:14px;padding:4px}
+  .play-card{width:54px;height:80px;padding:6px 0 0 6px}
+  .play-card .prank{font-size:20px}
+  .play-card .psuit{font-size:10px}
+  .action-bar-wrap{bottom:140px}
+  .action-bar .btn{padding:12px 20px;font-size:16px;min-width:50px}
+  .game-top-left{gap:4px}
+  .game-top-left .round-info{font-size:15px}
+  .game-top-left .btn-exit{width:28px;height:28px;font-size:14px}
+  .game-top-left .btn-detail{padding:2px 8px;font-size:11px}
+  .game-top-right{font-size:11px}
+  .game-top-right .action-hint{font-size:12px}
+  .phase-badge{font-size:11px;padding:2px 8px}
+  .multiplier-badge{font-size:12px}
+  .opponent .card-back{width:40px;height:58px}
+  .opponent .card-back .count{font-size:16px}
+  .opponent .pname{font-size:12px}
+  .dialog{max-width:300px;padding:16px}
+  .dialog .suit-btn{width:44px;height:44px;font-size:22px}
+  .dialog .rank-btn{width:38px;height:38px;font-size:14px}
+  .lobby-card{padding:16px}
+  .lobby-card h1{font-size:24px}
+  .lobby-card .subtitle{font-size:13px}
+  .player-item{min-width:100px;padding:12px}
+  .player-item .name{font-size:14px}
+  .room-code{font-size:28px}
+  .history-card{max-width:95vw;padding:12px}
+  .history-card .history-table{font-size:10px}
+  .history-card .history-table th,.history-card .history-table td{padding:2px 3px}
+  .btn{padding:12px;font-size:15px}
+  input[type=text],input[type=number]{padding:10px;font-size:16px}
+}
 </style>
 </head>
 <body>
@@ -1026,13 +1066,17 @@ function renderOpponents() {
 }
 
 function getOpponentSlots(count) {
-  // 把对手分布在：左侧、上方、右侧（上100px，左右150px）
-  if (count === 1) return [{ left: '50%', top: '100px' }]
-  if (count === 2) return [{ left: '150px', top: '50%' }, { left: 'calc(100% - 150px)', top: '50%' }]
-  if (count === 3) return [{ left: '150px', top: '50%' }, { left: '50%', top: '100px' }, { left: 'calc(100% - 150px)', top: '50%' }]
-  if (count === 4) return [{ left: '150px', top: '50%' }, { left: '30%', top: '100px' }, { left: '70%', top: '100px' }, { left: 'calc(100% - 150px)', top: '50%' }]
-  if (count === 5) return [{ left: '150px', top: '50%' }, { left: '25%', top: '100px' }, { left: '50%', top: '100px' }, { left: '75%', top: '100px' }, { left: 'calc(100% - 150px)', top: '50%' }]
-  return [{ left: '50%', top: '100px' }]
+  const w = window.innerWidth
+  const isMobile = w < 600
+  const sideX = isMobile ? '10px' : '150px'
+  const topY = isMobile ? '80px' : '100px'
+  const sideY = isMobile ? '55%' : '50%'
+  if (count === 1) return [{ left: '50%', top: topY }]
+  if (count === 2) return [{ left: sideX, top: sideY }, { left: `calc(100% - ${sideX})`, top: sideY }]
+  if (count === 3) return [{ left: sideX, top: sideY }, { left: '50%', top: topY }, { left: `calc(100% - ${sideX})`, top: sideY }]
+  if (count === 4) return [{ left: sideX, top: sideY }, { left: '30%', top: topY }, { left: '70%', top: topY }, { left: `calc(100% - ${sideX})`, top: sideY }]
+  if (count === 5) return [{ left: sideX, top: sideY }, { left: '25%', top: topY }, { left: '50%', top: topY }, { left: '75%', top: topY }, { left: `calc(100% - ${sideX})`, top: sideY }]
+  return [{ left: '50%', top: topY }]
 }
 
 function updateOppHandCount(seat, count) {
@@ -1279,6 +1323,7 @@ function closeHistory() {
 let lastLoggedMsg = ''
 
 function logMsg(text, highlight) {
+  if (window.innerWidth < 600) return
   // 去重：相同内容不重复记录
   const dedupKey = text
   if (dedupKey === lastLoggedMsg) return

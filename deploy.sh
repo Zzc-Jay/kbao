@@ -9,19 +9,17 @@ npm install --production
 echo "==> 构建 TypeScript..."
 npx tsc
 
-echo "==> 停止旧进程..."
-pkill -f "node dist/index.js" 2>/dev/null || echo "  没有旧进程在运行"
-
-echo "==> 启动服务..."
-nohup node dist/index.js > server.log 2>&1 & disown
-
-sleep 2
-
-if pgrep -f "node dist/index.js" > /dev/null; then
-  echo "==> 服务启动成功!"
-  cat server.log
+if pm2 describe kbao-server > /dev/null 2>&1; then
+  echo "==> 重启服务..."
+  pm2 restart kbao-server
 else
-  echo "==> 启动失败，查看日志："
-  cat server.log
-  exit 1
+  echo "==> 首次启动服务..."
+  pm2 start dist/index.js --name kbao-server
 fi
+
+echo "==> 服务状态："
+pm2 status kbao-server
+
+echo ""
+echo "==> 最近日志："
+pm2 logs kbao-server --lines 10 --nostream

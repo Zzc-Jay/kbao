@@ -135,7 +135,7 @@ input[type=text],input[type=number]{width:100%;padding:12px;border:1px solid rgb
   .hand-card .rank{font-size:20px}
   .hand-card .suit{font-size:9px}
   .hand-cards{width:280px;height:100px}
-  .hand-area{bottom:14px;padding:4px}
+  .hand-area{bottom:24px;padding:4px}
   .play-card{width:54px;height:80px;padding:6px 0 0 6px}
   .play-card .prank{font-size:20px}
   .play-card .psuit{font-size:10px}
@@ -1056,9 +1056,13 @@ function renderOpponents() {
     .sort((a, b) => ((a.seat - mySeat + total) % total) - ((b.seat - mySeat + total) % total))
   const slots = getOpponentSlots(total - 1)
   container.innerHTML = others.map((p, i) => {
-    const slot = slots[i] || { left: '50%', top: '100px' }
+    const slot = slots[i] || { left: '50%', top: '100px', align: 'center' }
+    let tx = -50, ty = -50
+    if (slot.align === 'left')  { tx = 0;   ty = -50 }
+    if (slot.align === 'right') { tx = -100; ty = -50 }
+    if (slot.align === 'top')   { tx = -50;  ty = 0 }
     return `<div class="opponent ${p.seat === currentTurn ? 'current' : ''} ${p.seat === bankerSeat ? 'is-banker' : ''}"
-      style="left:${slot.left};top:${slot.top};transform:translate(-50%,-50%)">
+      style="left:${slot.left};top:${slot.top};transform:translate(${tx}%,${ty}%)">
       <div class="pname">${avatarHTML(p.name, p.seat, true)} ${p.name || '玩家'}<span class="tag"></span></div>
       <div class="card-back"><span class="count">${p.handCount ?? '?'}</span></div>
     </div>`
@@ -1069,14 +1073,21 @@ function getOpponentSlots(count) {
   const w = window.innerWidth
   const isMobile = w < 600
   const sideX = isMobile ? '10px' : '150px'
-  const topY = isMobile ? '80px' : '100px'
-  const sideY = isMobile ? '55%' : '50%'
-  if (count === 1) return [{ left: '50%', top: topY }]
-  if (count === 2) return [{ left: sideX, top: sideY }, { left: `calc(100% - ${sideX})`, top: sideY }]
-  if (count === 3) return [{ left: sideX, top: sideY }, { left: '50%', top: topY }, { left: `calc(100% - ${sideX})`, top: sideY }]
-  if (count === 4) return [{ left: sideX, top: sideY }, { left: '30%', top: topY }, { left: '70%', top: topY }, { left: `calc(100% - ${sideX})`, top: sideY }]
-  if (count === 5) return [{ left: sideX, top: sideY }, { left: '25%', top: topY }, { left: '50%', top: topY }, { left: '75%', top: topY }, { left: `calc(100% - ${sideX})`, top: sideY }]
-  return [{ left: '50%', top: topY }]
+  const topY = isMobile ? '70px' : '100px'
+  const midY = isMobile ? '55%' : '50%'
+
+  // align: 'left'=左对齐, 'right'=右对齐, 'top'=顶部对齐(居中), 'center'=居中
+  function L()  { return { left: sideX, top: midY, align: 'left' } }
+  function R()  { return { left: `calc(100% - ${sideX})`, top: midY, align: 'right' } }
+  function T()  { return { left: '50%', top: topY, align: 'top' } }
+  function M(l) { return { left: l, top: topY, align: 'center' } }
+
+  if (count === 1) return [T()]
+  if (count === 2) return [L(), R()]
+  if (count === 3) return [L(), T(), R()]
+  if (count === 4) return [L(), M('30%'), M('70%'), R()]
+  if (count === 5) return [L(), M('25%'), M('50%'), M('75%'), R()]
+  return [T()]
 }
 
 function updateOppHandCount(seat, count) {

@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")/packages/server"
 
 echo "==> 安装依赖..."
-npm install --production
+npm install
 
 echo "==> 构建 TypeScript..."
 npx tsc

@@ -326,7 +326,10 @@ function handleDisconnect(ws: WebSocket, wss: WebSocketServer): void {
 // ─── GameEventBus for raw WebSocket ───
 
 function createWSEventBus(wss: WebSocketServer, roomCode: string): GameEventBus {
-  function botDelay(): number { return 400 + Math.random() * 600 }
+  function botDelay(type: 'bid' | 'play'): number {
+    if (type === 'bid') return 1200 + Math.random() * 800 // 要牌：1.2~2s，出牌2倍
+    return 600 + Math.random() * 400 // 出牌：0.6~1s
+  }
 
   function autoBid(rc: string, seat: number, phase: 'charge' | 'request'): void {
     setTimeout(() => {
@@ -376,7 +379,7 @@ function createWSEventBus(wss: WebSocketServer, roomCode: string): GameEventBus 
           room.game.submitBid(seat, { type: 'pass', seat })
         }
       }
-    }, botDelay())
+    }, botDelay('bid'))
   }
 
   function autoPlay(rc: string, seat: number): void {
@@ -410,7 +413,7 @@ function createWSEventBus(wss: WebSocketServer, roomCode: string): GameEventBus 
       } else {
         room.game.pass(seat)
       }
-    }, botDelay())
+    }, botDelay('play'))
   }
 
   return {

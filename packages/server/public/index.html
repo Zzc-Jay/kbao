@@ -55,7 +55,7 @@ input[type=text],input[type=number]{width:100%;padding:12px;border:1px solid rgb
 .opponent .card-back{display:inline-flex;align-items:center;justify-content:center;width:50px;height:72px;background:linear-gradient(135deg,#556,#778);border-radius:5px;margin-top:2px;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
 .opponent .card-back .count{color:#fff;font-size:20px;font-weight:bold;text-shadow:0 1px 2px rgba(0,0,0,0.6)}
 .opponent .pname{font-size:14px;display:flex;align-items:center;justify-content:center;gap:3px;line-height:1.2;margin-bottom:2px;white-space:nowrap}
-.opponent .pname .tag{font-size:11px;color:#f5a623}
+.opponent .pname .tag{font-size:11px;color:#f5a623;display:inline-block;min-width:60px;text-align:center}
 .opponent.current .card-back{box-shadow:0 0 0 2px #f5a623,0 2px 6px rgba(245,166,35,0.4)}
 .opponent.is-banker .pname .tag::before{content:'[庄]'}
 .opponent.current .pname .tag::before{content:'[出牌中]';color:#f5a623}
@@ -67,6 +67,7 @@ input[type=text],input[type=number]{width:100%;padding:12px;border:1px solid rgb
 .play-card.latest{box-shadow:0 0 10px #f5a623,0 0 25px rgba(245,166,35,0.6),0 3px 8px rgba(0,0,0,0.5)}
 .play-card .prank{font-size:24px;line-height:1.1}
 .play-card .psuit{font-size:12px;padding-left:3px}
+.swap-card{z-index:100 !important;box-shadow:0 0 14px rgba(245,166,35,0.55),0 4px 12px rgba(0,0,0,0.55)}
 
 /* 操作栏 */
 .action-bar-wrap{position:absolute;bottom:170px;left:50%;transform:translateX(-50%);z-index:60;pointer-events:auto}
@@ -128,9 +129,23 @@ input[type=text],input[type=number]{width:100%;padding:12px;border:1px solid rgb
 .msg-log::-webkit-scrollbar{width:4px}
 .msg-log::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:2px}
 
+/* 炸弹窗口抖动 */
+@keyframes bomb-shake {
+  0%,100%{transform:translate(0)}
+  10%{transform:translate(-5px,-3px)}
+  20%{transform:translate(5px,4px)}
+  30%{transform:translate(-7px,-5px)}
+  40%{transform:translate(6px,3px)}
+  50%{transform:translate(-4px,-4px)}
+  60%{transform:translate(5px,-3px)}
+  70%{transform:translate(-6px,5px)}
+  80%{transform:translate(3px,-4px)}
+  90%{transform:translate(-3px,3px)}
+}
+.bomb-shake{animation:bomb-shake 0.5s ease}
 /* ─── 手机适配 ─── */
 @media (max-width: 600px) {
-  .msg-log{display:none!important}
+  .msg-log{display:none}
   .hand-card{width:54px;height:80px;padding:6px 0 0 6px}
   .hand-card .rank{font-size:20px}
   .hand-card .suit{font-size:9px}
@@ -380,7 +395,7 @@ SOCKET.on('game:card-swapped', (data) => {
   const suits = {spade:'♠',heart:'♥',club:'♣',diamond:'♦'}
   const cardStr = suits[data.card.suit] + labels[data.card.rank]
   logMsg(`${reqName} 从 ${holName} 手中拿走了 ${cardStr}`, true)
-  updatePlayAreaForSwap(data.card)
+  animateCardSwap(data.requesterSeat, data.holderSeat, data.card)
 })
 
 // 服务器推送最新手牌（换牌后）
@@ -470,9 +485,10 @@ SOCKET.on('play:result', (data) => {
       renderHand()
       selectedGiveIdx = -1
     }
-    // 更新该玩家的手牌数
+    // 更新该玩家的手牌数（轻量更新，避免全量 re-render）
     const p = players.find(pl => pl.seat === data.seat)
-    if (p) p.handCount = data.handCount
+    if (p) { p.handCount = data.handCount }
+    updateOppHandCount(data.seat, data.handCount)
     // 所有玩家都需要知道最新出的牌（用于后续 emitPhase 更新）
     lastComboType = data.combo.type
     lastComboCards = data.combo.cards
@@ -480,6 +496,18 @@ SOCKET.on('play:result', (data) => {
     const cpName = cp ? (cp.name || '玩家') : '座' + (data.seat + 1)
     document.getElementById('actionHint').textContent = `${cpName} 出了 ${cardsToString(data.combo.cards)}`
     logMsg(`${cpName} 出了 ${cardsToString(data.combo.cards)}`, true)
+    // 炸弹抖动 + K 炸弹音效
+    if (data.combo.type === 'triple' || data.combo.type === 'quadruple') {
+      const inner = document.querySelector('.game-screen-inner')
+      inner.classList.remove('bomb-shake')
+      void inner.offsetWidth
+      inner.classList.add('bomb-shake')
+      // 3K 或 4K 触发特殊音效
+      const isK = data.combo.cards.length >= 3 && data.combo.cards.every(c => c.rank === 13)
+      if (isK) {
+        try { new Audio('/sounds/niganma.mp3').play().catch(() => {}) } catch (_) {}
+      }
+    }
   }
   if (data.isPass) {
     const cp = players.find(pl => pl.seat === data.seat)
@@ -487,8 +515,6 @@ SOCKET.on('play:result', (data) => {
     document.getElementById('actionHint').textContent = `${cpName} 不出`
     logMsg(`${cpName} 不出`)
   }
-  // 确保对手视图也刷新
-  renderOpponents()
   selectedCards.clear()
   renderHand()
 })
@@ -1074,10 +1100,10 @@ function renderOpponents() {
     if (slot.align === 'left')  { tx = 0;   ty = -50 }
     if (slot.align === 'right') { tx = -100; ty = -50 }
     if (slot.align === 'top')   { tx = -50;  ty = 0 }
-    return `<div class="opponent ${p.seat === currentTurn ? 'current' : ''} ${p.seat === bankerSeat ? 'is-banker' : ''}"
+    return `<div class="opponent ${p.seat === currentTurn ? 'current' : ''} ${p.seat === bankerSeat ? 'is-banker' : ''}" data-seat="${p.seat}"
       style="left:${slot.left};top:${slot.top};transform:translate(${tx}%,${ty}%)">
       <div class="pname">${avatarHTML(p.name, p.seat, true)} ${p.name || '玩家'}<span class="tag"></span></div>
-      <div class="card-back"><span class="count">${p.handCount ?? '?'}</span></div>
+      <div class="card-back"><span class="count" id="opp-count-${p.seat}">${p.handCount ?? '?'}</span></div>
     </div>`
   }).join('')
 }
@@ -1103,8 +1129,28 @@ function getOpponentSlots(count) {
   return [T()]
 }
 
+function highlightCurrentTurn() {
+  document.querySelectorAll('.opponent').forEach(el => {
+    const seat = parseInt(el.getAttribute('data-seat'))
+    const wasCurrent = el.classList.contains('current')
+    const shouldBeCurrent = seat === currentTurn
+    if (wasCurrent !== shouldBeCurrent) {
+      el.classList.toggle('current', shouldBeCurrent)
+    }
+    const shouldBeBanker = seat === bankerSeat
+    const wasBanker = el.classList.contains('is-banker')
+    if (wasBanker !== shouldBeBanker) {
+      el.classList.toggle('is-banker', shouldBeBanker)
+    }
+  })
+}
+
 function updateOppHandCount(seat, count) {
-  renderOpponents()
+  const el = document.getElementById('opp-count-' + seat)
+  if (el) el.textContent = count
+  // update players array
+  const p = players.find(pl => pl.seat === seat)
+  if (p) p.handCount = count
 }
 
 function getSeatRotation(seat) {
@@ -1179,7 +1225,7 @@ function updatePhaseUI() {
   }
   document.getElementById('phaseBadge').textContent = phaseMap[gamePhase] || gamePhase
   updateGameInfo()
-  renderOpponents()
+  highlightCurrentTurn()
 }
 
 function updateGameInfo() {
@@ -1369,16 +1415,101 @@ function logMsg(text, highlight) {
   }
 }
 
-function updatePlayAreaForSwap(card) {
+function getSeatScreenPosition(seat) {
+  if (seat === mySeat) {
+    const handEl = document.getElementById('handArea')
+    if (handEl && handEl.style.display !== 'none') {
+      const r = handEl.getBoundingClientRect()
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+    }
+    return { x: window.innerWidth / 2, y: window.innerHeight - 80 }
+  }
+  const oppEl = document.querySelector(`.opponent[data-seat="${seat}"]`)
+  if (oppEl) {
+    const r = oppEl.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  }
+  return { x: window.innerWidth / 2, y: 100 }
+}
+
+function animateCardSwap(requesterSeat, holderSeat, card) {
   const labels = {4:'4',5:'5',6:'6',7:'7',9:'9',10:'10',11:'J',12:'Q',13:'K'}
   const suits = {spade:'♠',heart:'♥',club:'♣',diamond:'♦'}
   const isRed = card.suit === 'heart' || card.suit === 'diamond'
   const area = document.getElementById('playArea')
-  area.innerHTML = `<div class="play-card ${isRed ? 'red' : ''}" style="opacity:0.7">
-    <span class="prank">${labels[card.rank]}</span>
-    <span class="psuit">${suits[card.suit]}</span>
-  </div>`
-  setTimeout(() => { if (area && area.innerHTML.indexOf('opacity:0.7') >= 0 && gamePhase !== 'playing') area.innerHTML = '' }, 2500)
+
+  const reqPos = getSeatScreenPosition(requesterSeat)
+  const holPos = getSeatScreenPosition(holderSeat)
+  const areaRect = area.getBoundingClientRect()
+  const cx = areaRect.width / 2
+  const cy = areaRect.height / 2
+
+  function makeCard(cls, inner, x, y) {
+    const el = document.createElement('div')
+    el.className = cls
+    el.style.cssText = `position:absolute;left:${x - 34}px;top:${y - 48}px;z-index:100;transition:left 0.6s ease-in-out,top 0.6s ease-in-out,opacity 0.4s;pointer-events:none;opacity:1`
+    el.innerHTML = inner
+    area.appendChild(el)
+    return el
+  }
+
+  const abs = (v, areaOffset) => v - areaOffset
+
+  // 被要的牌：持牌方 → 中央 → 要牌方
+  const reqCard = makeCard(
+    `play-card swap-card ${isRed ? 'red' : ''}`,
+    `<span class="prank">${labels[card.rank]}</span><span class="psuit">${suits[card.suit]}</span>`,
+    abs(holPos.x, areaRect.left), abs(holPos.y, areaRect.top)
+  )
+
+  // 给出的牌（牌背）：要牌方 → 中央 → 持牌方，与手牌背面一致
+  const backCard = makeCard(
+    'play-card swap-card',
+    '',
+    abs(reqPos.x, areaRect.left), abs(reqPos.y, areaRect.top)
+  )
+  backCard.style.background = 'linear-gradient(135deg,#556,#778)'
+  backCard.style.boxShadow = '0 3px 8px rgba(0,0,0,0.5), 0 0 14px rgba(245,166,35,0.55)'
+
+  // 中央文字提示（仅桌面端，手机端遮挡牌面不显示）
+  let infoLabel = null
+  if (window.innerWidth > 600) {
+    const reqP = players.find(p => p.seat === requesterSeat)
+    const holP = players.find(p => p.seat === holderSeat)
+    const reqName = reqP ? (reqP.name || '玩家') : '?'
+    const holName = holP ? (holP.name || '玩家') : '?'
+    const cardLabel = suits[card.suit] + labels[card.rank]
+    infoLabel = document.createElement('div')
+    infoLabel.style.cssText = `position:absolute;left:50%;top:${cy - 110}px;transform:translateX(-50%);z-index:110;pointer-events:none;font-size:16px;font-weight:bold;color:#f5a623;background:rgba(0,0,0,0.75);padding:6px 16px;border-radius:20px;white-space:nowrap;opacity:1;transition:opacity 0.4s`
+    infoLabel.textContent = `${reqName} 从 ${holName} 手中拿走了 ${cardLabel}`
+    area.appendChild(infoLabel)
+  }
+
+  // Phase 1: 飞向中央
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      reqCard.style.left = (cx - 60) + 'px'
+      reqCard.style.top = (cy - 48) + 'px'
+      backCard.style.left = (cx + 8) + 'px'
+      backCard.style.top = (cy - 48) + 'px'
+    })
+  })
+
+  // Phase 2: 飞向各自目标
+  setTimeout(() => {
+    reqCard.style.left = abs(reqPos.x, areaRect.left) + 'px'
+    reqCard.style.top = abs(reqPos.y, areaRect.top) + 'px'
+    backCard.style.left = abs(holPos.x, areaRect.left) + 'px'
+    backCard.style.top = abs(holPos.y, areaRect.top) + 'px'
+  }, 750)
+
+  // Phase 3: 淡出清除
+  setTimeout(() => {
+    reqCard.style.opacity = '0'
+    backCard.style.opacity = '0'
+    if (infoLabel) infoLabel.style.opacity = '0'
+    setTimeout(() => { reqCard.remove(); backCard.remove(); if (infoLabel) infoLabel.remove() }, 450)
+  }, 1600)
 }
 
 function showScreen(name) {

@@ -3,6 +3,7 @@ import { addPlayer, getPlayer, removePlayer, heartbeat, PlayerConn } from './pla
 import { createRoom, getRoom, joinRoom, leaveRoom, getRoomPlayers, deleteRoom } from './room'
 import { Game, GameEventBus } from './game'
 import { Card, Combo, Bid, Suit } from 'kbao-core'
+import { decideRequestBid, decidePlay, pickGiveCard } from './bot-ai'
 
 const BOT_NAMES = ['阿泰', '阿和', '老K', '包哥', '小牌']
 
@@ -265,51 +266,51 @@ function createEventBus(io: Server, _socket: Socket): GameEventBus {
       if (phase === 'charge') {
         room.game.submitBid(seat, { type: 'pass', seat })
       } else {
-        const startingSeat = room.game.getStartingSeat()
-        const isStarting = seat === startingSeat
-
-        // 非起始人：60% 概率直接过
-        if (!isStarting && Math.random() < 0.6) {
-          room.game.submitBid(seat, { type: 'pass', seat })
-          return
-        }
-
-        // 生成牌组中所有可能的非K牌（4花色 × 8点数 = 32张），排除自己手上已有的
         const hands = room.game.getHands()
-        const ownHand = hands[seat]
-        const suits: Suit[] = ['spade', 'heart', 'club', 'diamond']
-        const nonKRanks = [4, 5, 6, 7, 9, 10, 11, 12]
-        const candidates: Card[] = []
-        for (const suit of suits) {
-          for (const rank of nonKRanks) {
-            if (!ownHand.some(c => c.suit === suit && c.rank === rank)) {
-              candidates.push({ suit, rank } as Card)
-            }
-          }
-        }
-        // 随机打乱
-        for (let i = candidates.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [candidates[i], candidates[j]] = [candidates[j], candidates[i]]
-        }
+        const decision = decideRequestBid({
+          seat,
+          startingSeat: room.game.getStartingSeat(),
+          isFirstGame: room.game.isFirstGame(),
+          hand: hands[seat],
+          hasHeart4: room.game.hasHeart4(seat),
+        })
 
-        let ok = false
-        for (const card of candidates) {
-          const result = room.game.submitBid(seat, { type: 'request', seat, card: { suit: card.suit, rank: card.rank } })
-          if (result.ok) { ok = true; break }
-        }
-        // 起始人不能过：所有候选都失败时（极端情况），尝试 Q 和 J
-        if (!ok && isStarting) {
-          for (const suit of suits) {
-            for (const rank of [12, 11] as const) {
-              if (ownHand.some(c => c.suit === suit && c.rank === rank)) continue
-              const r = room.game.submitBid(seat, { type: 'request', seat, card: { suit, rank } })
-              if (r.ok) { ok = true; break }
+        if (decision.shouldRequest && decision.card) {
+          const result = room.game.submitBid(seat, {
+            type: 'request',
+            seat,
+            card: decision.card,
+            giveCard: decision.giveCard,
+          })
+          if (!result.ok) {
+            // 要牌被拒绝（极端情况），fallback 为 pass（非起始人）或继续尝试
+            if (seat === room.game.getStartingSeat()) {
+              // 起始人不能pass，尝试不指定giveCard重试
+              const retry = room.game.submitBid(seat, {
+                type: 'request', seat, card: decision.card,
+              })
+              if (!retry.ok) {
+                // 最后尝试：选一张手牌中"最没用"的非K牌
+                const give = pickGiveCard(hands[seat])
+                for (const suit of ['spade', 'heart', 'club', 'diamond'] as Suit[]) {
+                  for (const rank of [12, 11, 10, 9, 7, 6, 5, 4]) {
+                    if (hands[seat].some((c: Card) => c.suit === suit && c.rank === rank)) continue
+                    const r = room.game.submitBid(seat, {
+                      type: 'request', seat,
+                      card: { suit, rank } as Card,
+                      giveCard: give,
+                    })
+                    if (r.ok) return
+                  }
+                }
+              }
+            } else {
+              room.game.submitBid(seat, { type: 'pass', seat })
             }
-            if (ok) break
           }
+        } else {
+          room.game.submitBid(seat, { type: 'pass', seat })
         }
-        if (!ok) room.game.submitBid(seat, { type: 'pass', seat })
       }
     }, botDelay())
   }
@@ -322,25 +323,22 @@ function createEventBus(io: Server, _socket: Socket): GameEventBus {
       const hand = hands[seat]
       if (!hand || hand.length === 0) return
 
-      const lastPlay = room.game.getLastPlay()
+      const decision = decidePlay({
+        seat,
+        bankerSeat: room.game.getBankerSeat(),
+        lastPlay: room.game.getLastPlay(),
+        lastPlaySeat: room.game.getLastPlaySeat(),
+        playerCount: room.game.getPlayerCount(),
+        hand,
+      })
 
-      if (lastPlay) {
-        // 可以过牌 → 机器人喜欢过牌
-        if (Math.random() < 0.7) {
-          room.game.pass(seat)
-          return
-        }
-        const playable = findPlayableCombo(hand, lastPlay)
-        if (playable) {
-          const res = room.game.submitPlay(seat, playable)
-          if (!res.ok) room.game.pass(seat)
-          return
-        }
+      if (decision.pass) {
         room.game.pass(seat)
+      } else if (decision.cards) {
+        const res = room.game.submitPlay(seat, decision.cards)
+        if (!res.ok) room.game.pass(seat)
       } else {
-        // 新回合，必须出牌
-        const combo = pickNewRoundCombo(hand)
-        room.game.submitPlay(seat, combo)
+        room.game.pass(seat)
       }
     }, botDelay())
   }
@@ -455,127 +453,6 @@ function createEventBus(io: Server, _socket: Socket): GameEventBus {
     emitNextRound(roomCode) {
       io.to(roomCode).emit('game:next')
     },
-  }
-}
-
-const RANK_SEQ = [4, 5, 6, 7, 9, 10, 11, 12, 13]
-const RANK_NEXT: Record<number, number | null> = {4:5, 5:6, 6:7, 7:null, 9:10, 10:11, 11:12, 12:13, 13:null}
-
-function isSeqConsecutive(ranks: number[]): boolean {
-  for (let i = 1; i < ranks.length; i++) {
-    if (RANK_NEXT[ranks[i - 1]] !== ranks[i]) return false
-  }
-  return true
-}
-
-/** 按点数分组（用于找对子/炸弹） */
-function groupByRank(hand: Card[]): Map<number, Card[]> {
-  const m = new Map<number, Card[]>()
-  for (const c of hand) {
-    if (!m.has(c.rank)) m.set(c.rank, [])
-    m.get(c.rank)!.push(c)
-  }
-  return m
-}
-
-/** 新回合挑一组最小的合法牌型出 */
-function pickNewRoundCombo(hand: Card[]): Card[] {
-  const byRank = groupByRank(hand)
-  const sortedRanks = [...byRank.keys()].sort((a, b) => a - b)
-
-  // 有机会就出最小的对子
-  const pairs = sortedRanks.filter(r => byRank.get(r)!.length >= 2)
-  if (pairs.length > 0 && Math.random() < 0.4) {
-    return byRank.get(pairs[0])!.slice(0, 2)
-  }
-  // 默认出最小的单张
-  const sorted = [...hand].sort((a, b) => a.rank - b.rank)
-  return [sorted[0]]
-}
-
-/** 在手牌中找到能管上 lastPlay 的牌型 */
-function findPlayableCombo(hand: Card[], lastPlay: { type: string; rank: number; length: number }): Card[] | null {
-  const byRank = groupByRank(hand)
-  const sortedRanksAsc = [...byRank.keys()].sort((a, b) => a - b)
-
-  switch (lastPlay.type) {
-    case 'single': {
-      const bigger = hand.filter(c => c.rank > lastPlay.rank).sort((a, b) => a.rank - b.rank)
-      return bigger.length > 0 ? [bigger[0]] : null
-    }
-    case 'straight': {
-      const len = lastPlay.length
-      for (const tryMax of RANK_SEQ) {
-        if (tryMax <= lastPlay.rank) continue
-        const maxIdx = RANK_SEQ.indexOf(tryMax)
-        const startIdx = maxIdx - len + 1
-        if (startIdx < 0) continue
-        const neededRanks = RANK_SEQ.slice(startIdx, maxIdx + 1)
-        if (!isSeqConsecutive(neededRanks)) continue
-        const combo: Card[] = []
-        let ok = true
-        for (const r of neededRanks) {
-          const cards = byRank.get(r)
-          if (!cards || cards.length === 0) { ok = false; break }
-          combo.push(cards[0])
-        }
-        if (ok) return combo
-      }
-      // 炸弹压顺子
-      for (const r of sortedRanksAsc) {
-        if (byRank.get(r)!.length >= 4) return byRank.get(r)!.slice(0, 4)
-        if (byRank.get(r)!.length >= 3) return byRank.get(r)!.slice(0, 3)
-      }
-      return null
-    }
-    case 'pair': {
-      for (const r of sortedRanksAsc) {
-        if (r > lastPlay.rank && byRank.get(r)!.length >= 2) {
-          return byRank.get(r)!.slice(0, 2)
-        }
-      }
-      return null
-    }
-    case 'double-straight': {
-      const pairCount = lastPlay.length / 2
-      for (const tryMax of RANK_SEQ) {
-        if (tryMax <= lastPlay.rank) continue
-        const maxIdx = RANK_SEQ.indexOf(tryMax)
-        const startIdx = maxIdx - pairCount + 1
-        if (startIdx < 0) continue
-        const neededRanks = RANK_SEQ.slice(startIdx, maxIdx + 1)
-        if (!isSeqConsecutive(neededRanks)) continue
-        const combo: Card[] = []
-        let ok = true
-        for (const r of neededRanks) {
-          const cards = byRank.get(r)
-          if (!cards || cards.length < 2) { ok = false; break }
-          combo.push(cards[0], cards[1])
-        }
-        if (ok) return combo
-      }
-      // 炸弹压连对
-      for (const r of sortedRanksAsc) {
-        if (byRank.get(r)!.length >= 4) return byRank.get(r)!.slice(0, 4)
-        if (byRank.get(r)!.length >= 3) return byRank.get(r)!.slice(0, 3)
-      }
-      return null
-    }
-    case 'triple': {
-      for (const r of sortedRanksAsc) {
-        if (byRank.get(r)!.length >= 4) return byRank.get(r)!.slice(0, 4)
-      }
-      for (const r of sortedRanksAsc) {
-        if (r > lastPlay.rank && byRank.get(r)!.length >= 3) {
-          return byRank.get(r)!.slice(0, 3)
-        }
-      }
-      return null
-    }
-    case 'quadruple':
-      return null
-    default:
-      return null
   }
 }
 

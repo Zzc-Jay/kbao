@@ -68,24 +68,6 @@ export class Game {
     const deck = shuffle(createDeck(this.playerCount))
     this.hands = deal(deck, this.playerCount)
 
-    // 调试模式：红心4固定发给座0
-    if (this.debug) {
-      const heart4: Card = { suit: 'heart', rank: 4 }
-      if (!this.hands[0].some(c => c.suit === 'heart' && c.rank === 4)) {
-        for (let s = 1; s < this.hands.length; s++) {
-          const idx = this.hands[s].findIndex(c => c.suit === 'heart' && c.rank === 4)
-          if (idx >= 0) {
-            const swapCard = this.hands[0][0]
-            this.hands[0][0] = this.hands[s][idx]
-            this.hands[s][idx] = swapCard
-            this.hands[0].sort((a, b) => b.rank - a.rank)
-            this.hands[s].sort((a, b) => b.rank - a.rank)
-            break
-          }
-        }
-      }
-    }
-
     // 确定起始人
     if (this.firstGame) {
       this.startingSeat = findStartingPlayer(this.hands)
@@ -153,7 +135,7 @@ export class Game {
       }
       if (bid.type === 'request') {
         // 校验要牌合法性
-        const check = canRequestCard(bid.card, this.hands[seat], this.requestBids)
+        const check = canRequestCard(bid.card, this.hands[seat], this.requestBids, (bid as any).giveCard)
         if (!check.ok) return check
 
         // 找到持有者并交换
@@ -297,6 +279,11 @@ export class Game {
   getPlayerCount(): number { return this.playerCount }
   getRoundHistory(): any[] { return this.roundHistory }
   getLastPlay(): Combo | null { return this.lastPlay }
+  getLastPlaySeat(): number | null { return this.lastPlaySeat }
+  isFirstGame(): boolean { return this.firstGame }
+  hasHeart4(seat: number): boolean {
+    return this.hands[seat]?.some(c => c.suit === 'heart' && c.rank === 4) ?? false
+  }
 
   markReady(seat: number): void { this.readyPlayers.add(seat) }
   allReady(): boolean { return this.readyPlayers.size >= this.playerCount }

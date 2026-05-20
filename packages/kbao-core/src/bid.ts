@@ -9,13 +9,17 @@ import { Bid, Card, Rank } from './types'
 export function canRequestCard(
   card: Card,
   playerHand: Card[],
-  currentRoundBids: Bid[]
+  currentRoundBids: Bid[],
+  giveCard?: Card
 ): { ok: boolean; reason?: string } {
   if (card.rank === 13) {
     return { ok: false, reason: '不能要K，最高只能要Q' }
   }
   if (playerHand.some(c => c.suit === card.suit && c.rank === card.rank)) {
     return { ok: false, reason: '不能要自己已有的牌' }
+  }
+  if (giveCard && giveCard.rank === 13) {
+    return { ok: false, reason: '不能拿K去要牌' }
   }
   const alreadyRequested = currentRoundBids.some(
     b => b.type === 'request' &&

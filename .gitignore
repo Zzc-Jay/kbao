@@ -1,5 +1,6 @@
 .claude/
 packages/client/
 node_modules/
+dist/
 *.md
 *.pdf

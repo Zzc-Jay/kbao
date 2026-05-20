@@ -169,6 +169,15 @@ const canQ = canRequestCard(
 )
 assert(canQ.ok, '要Q允许')
 
+  // 不能拿K去要牌
+  const cantGiveK = canRequestCard(
+    { suit: 'spade', rank: 10 },
+    [{ suit: 'heart', rank: 13 }, { suit: 'heart', rank: 5 }],
+    [],
+    { suit: 'heart', rank: 13 }
+  )
+  assert(!cantGiveK.ok, '拿K去要牌被拒绝')
+
 console.log('\n=== 结算测试 ===')
 const payoutWin = settle(0, true, 5, 4)
 assert(payoutWin[0] === 15, '庄家赢5倍→收15（3对手×5）')

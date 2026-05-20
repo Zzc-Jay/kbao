@@ -220,14 +220,25 @@ function countRemainingPlays(remaining: Map<number, number>): number {
 
 /**
  * 新回合：选择最佳开局牌型
- * 策略：
- * - 优先出最长顺子（每点数用1张，不破坏炸弹）
- * - 其次出连对（但评估是否值得拆炸弹）
- * - 再其次出对子
- * - 保留炸弹（炸弹留着用于夺回出牌权）
+ * @param isBanker 自己是否为庄家
+ * @param bankerRemaining 庄家剩余牌数
  */
-function pickOpeningCombo(analysis: HandAnalysis): Card[] {
+function pickOpeningCombo(analysis: HandAnalysis, isBanker: boolean, bankerRemaining: number): Card[] {
   const { byRank, straights, doubleStraights, pairs, bombRanks } = analysis
+
+  // 自己快赢了 → 直接出完
+  const myCards = [...byRank.values()].flat()
+  if (myCards.length <= 2) {
+    if (myCards.length === 2 && myCards[0].rank === myCards[1].rank) {
+      return myCards // 对子直接出
+    }
+    return [sortByRankAsc(myCards)[0]] // 出最小的单张
+  }
+
+  // 庄家残血 → 出大牌压制，不给庄家接牌机会
+  if (!isBanker && bankerRemaining <= 3) {
+    return pickBigOpening(analysis)
+  }
 
   // 1. 优先出最长顺子（只消耗每点数1张，不破坏炸弹）
   if (straights.length > 0) {
@@ -241,16 +252,10 @@ function pickOpeningCombo(analysis: HandAnalysis): Card[] {
 
   // 2. 其次连对（需评估拆炸弹的代价）
   if (doubleStraights.length > 0) {
-    // 按连对长度降序排列
     const sorted = [...doubleStraights].sort((a, b) => b.pairCount - a.pairCount)
     for (const ds of sorted) {
-      // 计算拆弹代价：此连对会消耗多少个炸弹点数的2张以上
       const bombBreakCount = ds.ranks.filter(r => bombRanks.includes(r)).length
-      const pairCount = ds.pairCount
-
-      // 如果连对涉及的炸弹点数 >= 2，且连对不够长 → 不拆
-      if (bombBreakCount >= 1 && pairCount < 3) continue
-
+      if (bombBreakCount >= 1 && ds.pairCount < 3) continue
       const combo: Card[] = []
       for (const r of ds.ranks) {
         combo.push(byRank.get(r)![0], byRank.get(r)![1])
@@ -268,11 +273,49 @@ function pickOpeningCombo(analysis: HandAnalysis): Card[] {
     return byRank.get(pairs[0])!.slice(0, 2)
   }
 
-  // 4. 出最小的单张（避开炸弹点数中唯一的牌）
+  // 4. 庄家牌不多时出大单张压制
+  if (!isBanker && bankerRemaining <= 5) {
+    return [sortByRank([...byRank.values()].flat())[0]]
+  }
+
+  // 5. 正常情况出最小的单张
   const allCards = [...byRank.values()].flat()
   const nonBombCards = allCards.filter(c => !bombRanks.includes(c.rank))
   const pick = nonBombCards.length > 0 ? nonBombCards : allCards
   return [sortByRankAsc(pick)[0]]
+}
+
+/**
+ * 庄家残血时，开局出大牌压制
+ */
+function pickBigOpening(analysis: HandAnalysis): Card[] {
+  const { byRank, doubleStraights, pairs } = analysis
+
+  // 大顺子优先
+  const bigStraights = analysis.straights.filter(s => s.maxRank >= 11)
+  if (bigStraights.length > 0) {
+    const best = bigStraights.reduce((a, b) => b.maxRank >= a.maxRank ? b : a)
+    const combo: Card[] = []
+    for (const r of best.ranks) combo.push(byRank.get(r)![0])
+    return combo
+  }
+
+  // 大连对
+  if (doubleStraights.length > 0) {
+    const best = doubleStraights.reduce((a, b) => b.maxRank >= a.maxRank ? b : a)
+    const combo: Card[] = []
+    for (const r of best.ranks) combo.push(byRank.get(r)![0], byRank.get(r)![1])
+    return combo
+  }
+
+  // 最大的对子
+  if (pairs.length > 0) {
+    const maxPair = pairs[pairs.length - 1]
+    return byRank.get(maxPair)!.slice(0, 2)
+  }
+
+  // 最大的单张
+  return [sortByRank([...byRank.values()].flat())[0]]
 }
 
 /**
@@ -444,6 +487,7 @@ export interface PlayContext {
   lastPlaySeat: number | null
   playerCount: number
   hand: Card[]
+  handCounts: number[]       // 各座位剩余牌数
 }
 
 export interface PlayDecision {
@@ -452,16 +496,17 @@ export interface PlayDecision {
 }
 
 /**
- * 出牌决策
+ * 出牌决策 — 核心入口
  */
 export function decidePlay(ctx: PlayContext): PlayDecision {
-  const { seat, bankerSeat, lastPlay, lastPlaySeat, hand } = ctx
+  const { seat, bankerSeat, lastPlay, lastPlaySeat, hand, handCounts } = ctx
   const isBanker = seat === bankerSeat
   const analysis = analyzeHand(hand)
 
   // ── 新回合（自己出牌）──
   if (!lastPlay) {
-    const combo = pickOpeningCombo(analysis)
+    const bankerRemaining = handCounts[bankerSeat] ?? 99
+    const combo = pickOpeningCombo(analysis, isBanker, bankerRemaining)
     return { cards: combo, pass: false }
   }
 
@@ -469,11 +514,29 @@ export function decidePlay(ctx: PlayContext): PlayDecision {
   const lastPlayer = lastPlaySeat!
   const lastIsBanker = lastPlayer === bankerSeat
   const lastIsAlly = !isBanker && !lastIsBanker
-  const isAttackingMe = isBanker ? true : lastIsBanker
+
+  // 上家剩余牌数（handCounts 已是出牌后的数量）
+  const lastPlayerRemaining = handCounts[lastPlayer] ?? 0
+
+  // ── 🔴 紧急：庄家快跑完了 → 不顾一切拦截 ──
+  if (lastIsBanker && lastPlayerRemaining <= 2 && lastPlayerRemaining > 0) {
+    const beat = findEmergencyBlock(analysis, lastPlay)
+    if (beat) return { cards: beat, pass: false }
+    // 实在拦不住只能pass（没炸弹或牌不够）
+    return { cards: null, pass: true }
+  }
+
+  // ── 🟢 盟友快跑完了 → 打最小的牌送他走 ──
+  if (lastIsAlly && lastPlayerRemaining <= 2 && lastPlayerRemaining > 0) {
+    const smallest = findSmallestBeatToLetAllyWin(analysis, lastPlay)
+    if (smallest) return { cards: smallest, pass: false }
+    return { cards: null, pass: true }
+  }
+
+  // ── 常规决策 ──
 
   // 1. 如果是我方盟友出的牌 → 通常让过
   if (lastIsAlly) {
-    // 除非自己牌极好，能一鼓作气出完
     if (analysis.quality === 'excellent' && analysis.minPlays <= 2) {
       const beat = findSmallestBeat(analysis, lastPlay, true)
       if (beat) return { cards: beat, pass: false }
@@ -483,27 +546,69 @@ export function decidePlay(ctx: PlayContext): PlayDecision {
 
   // 2. 如果我是庄家 → 尽量要管上，保留出牌权
   if (isBanker) {
-    // 检查手牌：如果出了这一手后 minPlays 不劣化太多
     const beat = findBestBankerBeat(analysis, lastPlay)
     if (beat) return { cards: beat, pass: false }
     return { cards: null, pass: true }
   }
 
   // 3. 我是非庄家，要拦截庄家
-  // 90% 概率全力拦截，10% 概率留炸弹
   const goAllOut = Math.random() < 0.9
 
   if (goAllOut) {
-    // 尝试找到能管上的最小牌型（包含炸弹）
     const beat = findSmallestBeatFull(analysis, lastPlay)
     if (beat) return { cards: beat, pass: false }
   } else {
-    // 10% 保留炸弹：只用非炸弹牌型
     const beat = findBeatWithoutBomb(analysis.byRank, analysis.sortedRanks, lastPlay)
     if (beat) return { cards: beat, pass: false }
   }
 
   return { cards: null, pass: true }
+}
+
+/**
+ * 紧急拦截：庄家只剩1-2张牌时，不惜一切代价拦住
+ * 有炸弹用炸弹，没炸弹用最大能管上的牌型
+ */
+function findEmergencyBlock(analysis: HandAnalysis, lastPlay: Combo): Card[] | null {
+  const { byRank, sortedRanks, bombRanks } = analysis
+
+  // 1. 先尝试非炸弹拦截（保留炸弹用于下一手可能的拦截）
+  const normal = findBeatWithoutBomb(byRank, sortedRanks, lastPlay)
+  if (normal) return normal
+
+  // 2. 用炸弹拦截
+  return findBombBeat(byRank, sortedRanks, bombRanks, lastPlay)
+}
+
+/**
+ * 盟友快赢了 → 打出最小的能管上的牌，让盟友能够接过去
+ * 如果管不上就过牌（盟友自己出完即可）
+ */
+function findSmallestBeatToLetAllyWin(analysis: HandAnalysis, lastPlay: Combo): Card[] | null {
+  const { byRank, sortedRanks, bombRanks } = analysis
+
+  switch (lastPlay.type) {
+    case 'single': {
+      // 找最小的能管上的单张
+      for (const r of sortedRanks) {
+        if (r > lastPlay.rank && !bombRanks.includes(r)) {
+          return [byRank.get(r)![0]]
+        }
+      }
+      return null
+    }
+    case 'pair': {
+      for (const r of sortedRanks) {
+        if (r > lastPlay.rank && byRank.get(r)!.length >= 2 && !bombRanks.includes(r)) {
+          return byRank.get(r)!.slice(0, 2)
+        }
+      }
+      return null
+    }
+    default:
+      // 顺子/连对等情况：直接pass，让盟友自己赢
+      return null
+  }
 }
 
 /**

@@ -390,6 +390,7 @@ function createWSEventBus(wss: WebSocketServer, roomCode: string): GameEventBus 
         lastPlaySeat: room.game.getLastPlaySeat(),
         playerCount: room.game.getPlayerCount(),
         hand,
+        handCounts: hands.map(h => h.length),
       })
       if (decision.pass) {
         room.game.pass(seat)

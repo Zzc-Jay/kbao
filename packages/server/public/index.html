@@ -187,7 +187,12 @@ input[type=text],input[type=number]{width:100%;padding:12px;border:1px solid rgb
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
       <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;color:#aaa">
-        <input type="checkbox" id="debugMode" style="width:auto;margin:0"> 调试模式（自动填满机器人）
+        <input type="checkbox" id="debugMode" style="width:auto;margin:0" onclick="if(this.checked)document.getElementById('openCardsMode').checked=false"> 调试模式（自动填满机器人）
+      </label>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;color:#aaa">
+        <input type="checkbox" id="openCardsMode" style="width:auto;margin:0" onclick="if(this.checked)document.getElementById('debugMode').checked=false"> 明牌模式（机器人知道你的牌）
       </label>
     </div>
     <button class="btn btn-primary" onclick="createRoom()">创建房间</button>
@@ -206,6 +211,7 @@ input[type=text],input[type=number]{width:100%;padding:12px;border:1px solid rgb
   <div class="room-header">
     <button class="btn btn-small btn-outline" onclick="leaveRoom()">← 退出</button>
     <div class="room-code" id="roomCodeDisplay">------</div>
+    <span id="roomModeBadge" style="display:none;font-size:12px;color:#fff;background:#e74c3c;padding:2px 8px;border-radius:4px">明牌模式</span>
     <div style="width:60px"></div>
   </div>
   <div class="player-list" id="roomPlayerList"></div>
@@ -288,6 +294,7 @@ let gamePhase = ''
 let currentTurn = -1
 let bankerSeat = -1
 let isHost = false
+let isOpenCards = false
 let lastComboType = null
 let lastComboCards = null
 let players = []
@@ -311,6 +318,7 @@ SOCKET.on('connect', () => {
 SOCKET.on('room:created', (data) => {
   myRoomCode = data.roomCode
   isHost = true
+  isOpenCards = data.openCards
   players = data.players
   const me = players.find(p => p.id === SOCKET.id)
   if (me) mySeat = me.seat
@@ -567,9 +575,10 @@ function createRoom() {
   myName = name
   const pc = parseInt(document.getElementById('playerCount').value)
   const debug = document.getElementById('debugMode').checked
+  const openCards = document.getElementById('openCardsMode').checked
   SOCKET.emit('join', { name })
   // 直接发送 room:create，附带 name 作为兜底
-  SOCKET.emit('room:create', { playerCount: pc, debug, name })
+  SOCKET.emit('room:create', { playerCount: pc, debug, openCards, name })
 }
 
 let joiningRoom = false
@@ -598,6 +607,9 @@ function updateRoomUI(data) {
     </div>
   `).join('')
 
+  const badge = document.getElementById('roomModeBadge')
+  badge.style.display = isOpenCards ? 'inline-block' : 'none'
+
   const startBtn = document.getElementById('startBtn')
   const isMe = data.players.some(p => p.id === SOCKET.id)
   const hostPlayer = data.players[0]
@@ -624,6 +636,7 @@ function leaveRoom() {
   myRoomCode = ''
   mySeat = -1
   isHost = false
+  isOpenCards = false
   joiningRoom = false
   players = []
   myHand = []

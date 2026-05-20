@@ -9,6 +9,7 @@ export interface Room {
   game: Game | null
   createdAt: number
   debug: boolean            // 调试模式
+  openCards: boolean        // 明牌模式：机器人知道玩家手牌
 }
 
 const rooms = new Map<string, Room>()
@@ -20,7 +21,7 @@ function genCode(): string {
   }
 }
 
-export function createRoom(host: PlayerConn, playerCount: number, debug = false): Room {
+export function createRoom(host: PlayerConn, playerCount: number, debug = false, openCards = false): Room {
   const room: Room = {
     roomCode: genCode(),
     hostId: host.socketId,
@@ -29,6 +30,7 @@ export function createRoom(host: PlayerConn, playerCount: number, debug = false)
     game: null,
     createdAt: Date.now(),
     debug,
+    openCards,
   }
   host.roomId = room.roomCode
   host.seat = 0

@@ -131,7 +131,7 @@ function handleJoin(ws: WebSocket, wss: WebSocketServer, data: { name: string })
   }
 }
 
-function handleCreateRoom(ws: WebSocket, wss: WebSocketServer, data: { playerCount: number; debug?: boolean; name?: string }): void {
+function handleCreateRoom(ws: WebSocket, wss: WebSocketServer, data: { playerCount: number; debug?: boolean; openCards?: boolean; name?: string }): void {
   const wsId = (ws as any).__id
   let player = getPlayer(wsId)
   if (!player) {
@@ -142,10 +142,12 @@ function handleCreateRoom(ws: WebSocket, wss: WebSocketServer, data: { playerCou
   }
 
   const pc = Math.max(4, Math.min(6, data.playerCount || 4))
-  const room = createRoom(player, pc, data.debug)
+  const isOpenCards = data.openCards || false
+  const isDebug = data.debug || false
+  const room = createRoom(player, pc, isDebug, isOpenCards)
 
-  // 调试模式：填充机器人
-  if (data.debug) {
+  // 调试/明牌模式：填充机器人
+  if (isDebug || isOpenCards) {
     for (let i = room.players.length; i < pc; i++) {
       const botId = `bot_${room.roomCode}_${i}`
       const bot: PlayerConn = {
@@ -163,8 +165,9 @@ function handleCreateRoom(ws: WebSocket, wss: WebSocketServer, data: { playerCou
     roomCode: room.roomCode,
     playerCount: pc,
     players: room.players.map(p => ({ id: p.socketId, name: p.name, seat: p.seat })),
+    openCards: isOpenCards,
   })
-  console.log(`[WS房间] ${player.name} 创建 ${room.roomCode} (${pc}人)${data.debug ? ' [调试]' : ''}`)
+  console.log(`[WS房间] ${player.name} 创建 ${room.roomCode} (${pc}人)${isOpenCards ? ' [明牌]' : isDebug ? ' [调试]' : ''}`)
 }
 
 function handleJoinRoom(ws: WebSocket, wss: WebSocketServer, data: { roomCode: string }): void {
@@ -222,8 +225,8 @@ function handleStartGame(ws: WebSocket, wss: WebSocketServer): void {
 
   try {
     const bus = createWSEventBus(wss, room.roomCode)
-    room.game = new Game(room.roomCode, room.playerCount, bus, room.debug)
-    console.log(`[WS游戏] ${room.roomCode} 开始`)
+    room.game = new Game(room.roomCode, room.playerCount, bus, room.debug, room.openCards)
+    console.log(`[WS游戏] ${room.roomCode} 开始${room.openCards ? ' [明牌]' : ''}`)
     room.game.start()
   } catch (e: any) {
     console.error('[WS游戏] 启动失败:', e.message, e.stack)
@@ -383,6 +386,7 @@ function createWSEventBus(wss: WebSocketServer, roomCode: string): GameEventBus 
       const hands = room.game.getHands()
       const hand = hands[seat]
       if (!hand || hand.length === 0) return
+      const isOpenCards = room.game.isOpenCards()
       const decision = decidePlay({
         seat,
         bankerSeat: room.game.getBankerSeat(),
@@ -391,6 +395,12 @@ function createWSEventBus(wss: WebSocketServer, roomCode: string): GameEventBus 
         playerCount: room.game.getPlayerCount(),
         hand,
         handCounts: hands.map(h => h.length),
+        humanHands: isOpenCards
+          ? room.players
+              .filter(p => !p.isBot)
+              .map(p => hands[p.seat])
+              .flat()
+          : undefined,
       })
       if (decision.pass) {
         room.game.pass(seat)

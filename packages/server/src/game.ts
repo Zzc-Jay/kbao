@@ -39,10 +39,12 @@ export class Game {
   private readyPlayers: Set<number>
   private eventBus: GameEventBus
   private firstGame: boolean       // 是否为本房间第一局
-  private debug: boolean            // 调试模式：红心4固定发给座0
+  private debug: boolean            // 调试模式
+  private openCards: boolean        // 明牌模式：机器人知道玩家手牌
 
-  constructor(roomCode: string, playerCount: number, eventBus: GameEventBus, debug = false) {
+  constructor(roomCode: string, playerCount: number, eventBus: GameEventBus, debug = false, openCards = false) {
     this.debug = debug
+    this.openCards = openCards
     this.roomCode = roomCode
     this.playerCount = playerCount
     this.eventBus = eventBus
@@ -281,6 +283,7 @@ export class Game {
   getLastPlay(): Combo | null { return this.lastPlay }
   getLastPlaySeat(): number | null { return this.lastPlaySeat }
   isFirstGame(): boolean { return this.firstGame }
+  isOpenCards(): boolean { return this.openCards }
   hasHeart4(seat: number): boolean {
     return this.hands[seat]?.some(c => c.suit === 'heart' && c.rank === 4) ?? false
   }

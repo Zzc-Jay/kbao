@@ -478,6 +478,258 @@ function shouldBreakBomb(
   return false
 }
 
+// ==================== 明牌模式辅助 ====================
+
+/**
+ * 检查玩家能否管上给定的牌型
+ */
+function canPlayerBeat(playerHand: Card[], combo: Combo): boolean {
+  return findPlayerBeat(playerHand, combo) !== null
+}
+
+/**
+ * 找玩家手牌中能管上 combo 的任意牌型
+ */
+function findPlayerBeat(playerHand: Card[], combo: Combo): Card[] | null {
+  const byRank = groupByRank(playerHand)
+  const sortedRanks = [...byRank.keys()].sort((a, b) => a - b)
+
+  switch (combo.type) {
+    case 'single': {
+      for (const r of sortedRanks) {
+        if (r > combo.rank) return [byRank.get(r)![0]]
+      }
+      return null
+    }
+    case 'pair': {
+      for (const r of sortedRanks) {
+        if (r > combo.rank && byRank.get(r)!.length >= 2) {
+          return byRank.get(r)!.slice(0, 2)
+        }
+      }
+      return null
+    }
+    case 'straight': {
+      const len = combo.length
+      for (const tryMax of RANK_SEQ) {
+        if (tryMax <= combo.rank) continue
+        const maxIdx = RANK_SEQ.indexOf(tryMax)
+        const startIdx = maxIdx - len + 1
+        if (startIdx < 0) continue
+        const neededRanks = RANK_SEQ.slice(startIdx, maxIdx + 1)
+        if (!isConsecutive(neededRanks)) continue
+        const cards: Card[] = []
+        let ok = true
+        for (const r of neededRanks) {
+          const c = byRank.get(r)
+          if (!c || c.length === 0) { ok = false; break }
+          cards.push(c[0])
+        }
+        if (ok) return cards
+      }
+      // check bombs (straights can be beaten by triple or quad bombs)
+      for (const r of sortedRanks) {
+        if (byRank.get(r)!.length >= 4) return byRank.get(r)!.slice(0, 4)
+        if (byRank.get(r)!.length >= 3) return byRank.get(r)!.slice(0, 3)
+      }
+      return null
+    }
+    case 'double-straight': {
+      const pairCount = combo.length / 2
+      for (const tryMax of RANK_SEQ) {
+        if (tryMax <= combo.rank) continue
+        const maxIdx = RANK_SEQ.indexOf(tryMax)
+        const startIdx = maxIdx - pairCount + 1
+        if (startIdx < 0) continue
+        const neededRanks = RANK_SEQ.slice(startIdx, maxIdx + 1)
+        if (!isConsecutive(neededRanks)) continue
+        const cards: Card[] = []
+        let ok = true
+        for (const r of neededRanks) {
+          const c = byRank.get(r)
+          if (!c || c.length < 2) { ok = false; break }
+          cards.push(c[0], c[1])
+        }
+        if (ok) return cards
+      }
+      for (const r of sortedRanks) {
+        if (byRank.get(r)!.length >= 4) return byRank.get(r)!.slice(0, 4)
+        if (byRank.get(r)!.length >= 3) return byRank.get(r)!.slice(0, 3)
+      }
+      return null
+    }
+    case 'triple': {
+      for (const r of sortedRanks) {
+        if (byRank.get(r)!.length >= 4) return byRank.get(r)!.slice(0, 4)
+      }
+      for (const r of sortedRanks) {
+        if (r > combo.rank && byRank.get(r)!.length >= 3) {
+          return byRank.get(r)!.slice(0, 3)
+        }
+      }
+      return null
+    }
+    case 'quadruple':
+      return null
+    default:
+      return null
+  }
+}
+
+/**
+ * 找人类无法管上的最优出牌
+ * 在新回合或需要压制时使用
+ */
+function findHumanCantBeat(
+  myAnalysis: HandAnalysis,
+  humanHand: Card[],
+  preferBig: boolean
+): Card[] | null {
+  const { byRank, straights, doubleStraights, pairs, sortedRanks } = myAnalysis
+
+  // 优先出手牌中最长的、人类管不上的顺子
+  if (straights.length > 0) {
+    for (const s of straights.sort((a, b) => b.length - a.length)) {
+      const combo: Card[] = []
+      for (const r of s.ranks) combo.push(byRank.get(r)![0])
+      // 检查人类能否管上
+      const testCombo: Combo = { type: 'straight', cards: combo, rank: s.maxRank as Rank, length: s.length }
+      if (!canPlayerBeat(humanHand, testCombo)) return combo
+    }
+  }
+
+  // 连对
+  if (doubleStraights.length > 0) {
+    for (const ds of doubleStraights.sort((a, b) => b.pairCount - a.pairCount)) {
+      const combo: Card[] = []
+      for (const r of ds.ranks) combo.push(byRank.get(r)![0], byRank.get(r)![1])
+      const testCombo: Combo = { type: 'double-straight', cards: combo, rank: ds.maxRank as Rank, length: ds.pairCount * 2 }
+      if (!canPlayerBeat(humanHand, testCombo)) return combo
+    }
+  }
+
+  // 对子
+  if (pairs.length > 0) {
+    const sortedPairs = preferBig ? [...pairs].reverse() : pairs
+    for (const r of sortedPairs) {
+      const combo = byRank.get(r)!.slice(0, 2)
+      const testCombo: Combo = { type: 'pair', cards: combo, rank: r as Rank, length: 1 }
+      if (!canPlayerBeat(humanHand, testCombo)) return combo
+    }
+  }
+
+  // 单张
+  const allCards = [...byRank.values()].flat()
+  const sorted = preferBig ? sortByRank(allCards) : sortByRankAsc(allCards)
+  for (const c of sorted) {
+    const testCombo: Combo = { type: 'single', cards: [c], rank: c.rank, length: 1 }
+    if (!canPlayerBeat(humanHand, testCombo)) return [c]
+  }
+
+  // 人类都能管上 → 出最大的单张（迫使人类出大牌）
+  return [sortByRank(allCards)[0]]
+}
+
+/**
+ * 找最小的能管上 currentPlay 的牌型，且人类无法反管
+ */
+function findMinimalBlockHumanCantCounter(
+  myAnalysis: HandAnalysis,
+  humanHand: Card[],
+  currentPlay: Combo
+): Card[] | null {
+  const { byRank, sortedRanks } = myAnalysis
+  const allOptions: Card[][] = []
+
+  // 收集所有能管上的选项
+  switch (currentPlay.type) {
+    case 'single': {
+      for (const r of sortedRanks) {
+        if (r > currentPlay.rank) allOptions.push([byRank.get(r)![0]])
+      }
+      break
+    }
+    case 'pair': {
+      for (const r of sortedRanks) {
+        if (r > currentPlay.rank && byRank.get(r)!.length >= 2) {
+          allOptions.push(byRank.get(r)!.slice(0, 2))
+        }
+      }
+      break
+    }
+    case 'straight': {
+      const len = currentPlay.length
+      for (const tryMax of RANK_SEQ) {
+        if (tryMax <= currentPlay.rank) continue
+        const maxIdx = RANK_SEQ.indexOf(tryMax)
+        const startIdx = maxIdx - len + 1
+        if (startIdx < 0) continue
+        const neededRanks = RANK_SEQ.slice(startIdx, maxIdx + 1)
+        if (!isConsecutive(neededRanks)) continue
+        const cards: Card[] = []
+        let ok = true
+        for (const r of neededRanks) {
+          const c = byRank.get(r)
+          if (!c || c.length === 0) { ok = false; break }
+          cards.push(c[0])
+        }
+        if (ok) allOptions.push(cards)
+      }
+      break
+    }
+    case 'double-straight': {
+      const pairCount = currentPlay.length / 2
+      for (const tryMax of RANK_SEQ) {
+        if (tryMax <= currentPlay.rank) continue
+        const maxIdx = RANK_SEQ.indexOf(tryMax)
+        const startIdx = maxIdx - pairCount + 1
+        if (startIdx < 0) continue
+        const neededRanks = RANK_SEQ.slice(startIdx, maxIdx + 1)
+        if (!isConsecutive(neededRanks)) continue
+        const cards: Card[] = []
+        let ok = true
+        for (const r of neededRanks) {
+          const c = byRank.get(r)
+          if (!c || c.length < 2) { ok = false; break }
+          cards.push(c[0], c[1])
+        }
+        if (ok) allOptions.push(cards)
+      }
+      break
+    }
+  }
+
+  // 按主牌点数从小到大排序
+  allOptions.sort((a, b) => {
+    const rankA = Math.max(...a.map(c => c.rank))
+    const rankB = Math.max(...b.map(c => c.rank))
+    return rankA - rankB
+  })
+
+  // 找第一个人类无法反管的
+  for (const cards of allOptions) {
+    const rank = Math.max(...cards.map(c => c.rank))
+    const type = cards.length === 1 ? 'single' : cards.length === 2 && cards[0].rank === cards[1].rank ? 'pair' :
+      cards.length >= 3 && cards.every(c => c.rank === cards[0].rank) ? (cards.length === 4 ? 'quadruple' : 'triple') :
+      'straight'
+    const testCombo: Combo = { type: type as Combo['type'], cards, rank: rank as Rank, length: cards.length }
+    if (!canPlayerBeat(humanHand, testCombo)) return cards
+  }
+
+  // 人类都能反管 → 加上炸弹
+  for (const r of sortedRanks) {
+    if (byRank.get(r)!.length >= 4) return byRank.get(r)!.slice(0, 4)
+  }
+  for (const r of sortedRanks) {
+    if (currentPlay.type !== 'triple' && currentPlay.type !== 'quadruple' && byRank.get(r)!.length >= 3) {
+      return byRank.get(r)!.slice(0, 3)
+    }
+  }
+
+  // 实在找不到 → 返回第一个能管上的
+  return allOptions.length > 0 ? allOptions[0] : null
+}
+
 // ==================== 决策入口 ====================
 
 export interface PlayContext {
@@ -488,6 +740,7 @@ export interface PlayContext {
   playerCount: number
   hand: Card[]
   handCounts: number[]       // 各座位剩余牌数
+  humanHands?: Card[]        // 明牌模式：人类玩家的手牌
 }
 
 export interface PlayDecision {
@@ -499,9 +752,16 @@ export interface PlayDecision {
  * 出牌决策 — 核心入口
  */
 export function decidePlay(ctx: PlayContext): PlayDecision {
-  const { seat, bankerSeat, lastPlay, lastPlaySeat, hand, handCounts } = ctx
+  const { seat, bankerSeat, lastPlay, lastPlaySeat, hand, handCounts, humanHands } = ctx
   const isBanker = seat === bankerSeat
   const analysis = analyzeHand(hand)
+
+  // ═══ 明牌模式：知道人类手牌 → 最优出牌 ═══
+  if (humanHands && humanHands.length > 0) {
+    return decidePlayOpenCards(ctx, analysis, humanHands)
+  }
+
+  // ═══ 普通模式 ═══
 
   // ── 新回合（自己出牌）──
   if (!lastPlay) {
@@ -510,19 +770,15 @@ export function decidePlay(ctx: PlayContext): PlayDecision {
     return { cards: combo, pass: false }
   }
 
-  // ── 需要应对桌上的牌 ──
   const lastPlayer = lastPlaySeat!
   const lastIsBanker = lastPlayer === bankerSeat
   const lastIsAlly = !isBanker && !lastIsBanker
-
-  // 上家剩余牌数（handCounts 已是出牌后的数量）
   const lastPlayerRemaining = handCounts[lastPlayer] ?? 0
 
-  // ── 🔴 紧急：庄家快跑完了 → 不顾一切拦截 ──
+  // ── 🔴 庄家快跑完了 → 不顾一切拦截 ──
   if (lastIsBanker && lastPlayerRemaining <= 2 && lastPlayerRemaining > 0) {
     const beat = findEmergencyBlock(analysis, lastPlay)
     if (beat) return { cards: beat, pass: false }
-    // 实在拦不住只能pass（没炸弹或牌不够）
     return { cards: null, pass: true }
   }
 
@@ -533,9 +789,7 @@ export function decidePlay(ctx: PlayContext): PlayDecision {
     return { cards: null, pass: true }
   }
 
-  // ── 常规决策 ──
-
-  // 1. 如果是我方盟友出的牌 → 通常让过
+  // 1. 盟友出牌 → 让过
   if (lastIsAlly) {
     if (analysis.quality === 'excellent' && analysis.minPlays <= 2) {
       const beat = findSmallestBeat(analysis, lastPlay, true)
@@ -544,16 +798,15 @@ export function decidePlay(ctx: PlayContext): PlayDecision {
     return { cards: null, pass: true }
   }
 
-  // 2. 如果我是庄家 → 尽量要管上，保留出牌权
+  // 2. 庄家 → 尽量管上
   if (isBanker) {
     const beat = findBestBankerBeat(analysis, lastPlay)
     if (beat) return { cards: beat, pass: false }
     return { cards: null, pass: true }
   }
 
-  // 3. 我是非庄家，要拦截庄家
+  // 3. 非庄家拦截庄家
   const goAllOut = Math.random() < 0.9
-
   if (goAllOut) {
     const beat = findSmallestBeatFull(analysis, lastPlay)
     if (beat) return { cards: beat, pass: false }
@@ -561,6 +814,67 @@ export function decidePlay(ctx: PlayContext): PlayDecision {
     const beat = findBeatWithoutBomb(analysis.byRank, analysis.sortedRanks, lastPlay)
     if (beat) return { cards: beat, pass: false }
   }
+
+  return { cards: null, pass: true }
+}
+
+/**
+ * 明牌模式出牌决策 — 知道人类手牌，确保机器人和盟友赢
+ */
+function decidePlayOpenCards(
+  ctx: PlayContext,
+  analysis: HandAnalysis,
+  humanHand: Card[]
+): PlayDecision {
+  const { seat, bankerSeat, lastPlay, lastPlaySeat, handCounts } = ctx
+  const isBanker = seat === bankerSeat
+
+  // ── 新回合 → 出人类管不上的牌 ──
+  if (!lastPlay) {
+    const bankerRemaining = handCounts[bankerSeat] ?? 99
+    const combo = findHumanCantBeat(analysis, humanHand, !isBanker && bankerRemaining <= 3)
+    if (combo && combo.length > 0) return { cards: combo, pass: false }
+    const fallback = pickOpeningCombo(analysis, isBanker, bankerRemaining)
+    return { cards: fallback, pass: false }
+  }
+
+  const lastPlayer = lastPlaySeat!
+  const lastIsBanker = lastPlayer === bankerSeat
+  const lastIsAlly = !isBanker && !lastIsBanker
+  const lastPlayerRemaining = handCounts[lastPlayer] ?? 0
+
+  // ── 🔴 任何人快出完了 → 拦截（人类要拦，盟友要送）──
+  if (lastPlayerRemaining <= 2 && lastPlayerRemaining > 0) {
+    if (lastIsAlly) {
+      // 盟友快赢了 → 送他
+      const smallest = findSmallestBeatToLetAllyWin(analysis, lastPlay)
+      if (smallest) return { cards: smallest, pass: false }
+      return { cards: null, pass: true }
+    }
+    // 人类快赢了 → 最优拦截
+    const beat = findMinimalBlockHumanCantCounter(analysis, humanHand, lastPlay)
+    if (beat) return { cards: beat, pass: false }
+    const emergency = findEmergencyBlock(analysis, lastPlay)
+    if (emergency) return { cards: emergency, pass: false }
+    return { cards: null, pass: true }
+  }
+
+  // 1. 盟友出牌 → 让过
+  if (lastIsAlly) {
+    if (analysis.quality === 'excellent' && analysis.minPlays <= 2) {
+      const beat = findSmallestBeat(analysis, lastPlay, true)
+      if (beat) return { cards: beat, pass: false }
+    }
+    return { cards: null, pass: true }
+  }
+
+  // 2. 人类出牌 → 找最优拦截（人类无法反管的最小牌型）
+  const beat = findMinimalBlockHumanCantCounter(analysis, humanHand, lastPlay)
+  if (beat) return { cards: beat, pass: false }
+
+  // 找不到完美拦截 → 用炸弹
+  const bomb = findBombBeat(analysis.byRank, analysis.sortedRanks, analysis.bombRanks, lastPlay)
+  if (bomb) return { cards: bomb, pass: false }
 
   return { cards: null, pass: true }
 }

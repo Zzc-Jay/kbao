@@ -41,7 +41,7 @@ export function setupSocket(io: Server): void {
     })
 
     // ─── 房间：创建 ───
-    socket.on('room:create', (data: { playerCount: number; debug?: boolean; name?: string }) => {
+    socket.on('room:create', (data: { playerCount: number; debug?: boolean; openCards?: boolean; name?: string }) => {
       // 确保玩家已注册（兼容 join 事件未到达的情况）
       let player = getPlayer(socket.id)
       if (!player) {
@@ -51,11 +51,13 @@ export function setupSocket(io: Server): void {
       }
 
       const pc = Math.max(4, Math.min(6, data.playerCount || 4))
-      const room = createRoom(player, pc, data.debug)
+      const isOpenCards = data.openCards || false
+      const isDebug = data.debug || false
+      const room = createRoom(player, pc, isDebug, isOpenCards)
       socket.join(room.roomCode)
 
-      // 调试模式：自动填满机器人
-      if (data.debug) {
+      // 调试/明牌模式：自动填满机器人
+      if (isDebug || isOpenCards) {
         for (let i = room.players.length; i < pc; i++) {
           const botId = `bot_${room.roomCode}_${i}`
           const bot: PlayerConn = {
@@ -75,8 +77,9 @@ export function setupSocket(io: Server): void {
         roomCode: room.roomCode,
         playerCount: pc,
         players: room.players.map(p => ({ id: p.socketId, name: p.name, seat: p.seat })),
+        openCards: isOpenCards,
       })
-      console.log(`[房间] ${player.name} 创建 ${room.roomCode} (${pc}人)${data.debug ? ' [调试]' : ''}`)
+      console.log(`[房间] ${player.name} 创建 ${room.roomCode} (${pc}人)${isOpenCards ? ' [明牌]' : isDebug ? ' [调试]' : ''}`)
     })
 
     // ─── 房间：加入 ───
@@ -145,8 +148,8 @@ export function setupSocket(io: Server): void {
       }
 
       const bus = createEventBus(io, socket)
-      room.game = new Game(room.roomCode, room.playerCount, bus, room.debug)
-      console.log(`[游戏] ${room.roomCode} 开始`)
+      room.game = new Game(room.roomCode, room.playerCount, bus, room.debug, room.openCards)
+      console.log(`[游戏] ${room.roomCode} 开始${room.openCards ? ' [明牌]' : ''}`)
       room.game.start()
     })
 
@@ -323,6 +326,7 @@ function createEventBus(io: Server, _socket: Socket): GameEventBus {
       const hand = hands[seat]
       if (!hand || hand.length === 0) return
 
+      const isOpenCards = room.game.isOpenCards()
       const decision = decidePlay({
         seat,
         bankerSeat: room.game.getBankerSeat(),
@@ -331,6 +335,13 @@ function createEventBus(io: Server, _socket: Socket): GameEventBus {
         playerCount: room.game.getPlayerCount(),
         hand,
         handCounts: hands.map(h => h.length),
+        // 明牌模式：传人类玩家的手牌给机器人
+        humanHands: isOpenCards
+          ? room.players
+              .filter(p => !p.isBot)
+              .map(p => hands[p.seat])
+              .flat()
+          : undefined,
       })
 
       if (decision.pass) {
